@@ -1,0 +1,12 @@
+# 上游参考源码（体积过大不入库，用 MANIFEST.md + scripts/fetch-upstream.sh 复现）
+upstream/
+
+# 构建产物
+build/
+*.o
+*.elf
+*.bin
+*.img
+*.iso
+serial.log
+*.log
