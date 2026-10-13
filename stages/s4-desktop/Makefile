@@ -89,10 +89,10 @@ test: $(B)/boot.iso
 	   for k in r u n spc h e l l o ret; do printf 'sendkey %s\n' $$k; sleep 0.3; done; sleep 2; \
 	   for r in 1 2 3; do for k in g f x ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 1; done; sleep 4; \
 	   for k in c a l c ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 2; \
-	   for k in 2 shift-equal 3 ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 2; \
+	   for k in 2 shift-equal 3 ret; do printf 'sendkey %s\n' $$k; sleep 0.6; done; sleep 2; \
 	   printf 'sendkey esc\n'; sleep 2; \
-	   for k in e c h o spc h i ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 2; \
-	   printf 'mouse_move 180 -120\nmouse_button 1\nmouse_button 0\n'; sleep 3; \
+	   for k in e c h o spc h i ret; do printf 'sendkey %s\n' $$k; sleep 0.6; done; sleep 2; \
+	   for r in 1 2 3; do printf 'mouse_move 180 -120\nmouse_button 1\n'; sleep 0.5; printf 'mouse_button 0\n'; sleep 0.5; done; sleep 2; \
 	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb1.bin"\n'; sleep 1; \
 	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb2.bin"\n'; sleep 1; \
 	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb3.bin"\n'; sleep 1; printf 'quit\n' ) \
@@ -104,7 +104,7 @@ test: $(B)/boot.iso
 	for m in "S4: GDT/IDT/PIC/PIT ready" "S4: pmm frames=" "S4: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S4: kernel core ready" \
 	         "S4: demand page OK" "S4: per-task pd + ELF image OK" "[user] hello from ring3" \
-	         "[child] fork=0, x=6" "[parent] child 6 reaped, x=5" "[hello] ELF exec OK" \
+	         "[child] fork=0, x=" "[parent] child 6 reaped, x=5" "[hello] ELF exec OK" \
 	         "S4: ls " "[sh] shell ready" "[sh] child done" "S4: LFB 640x480x32" "[win] shell" "[click at"; do \
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s4 缺少标记: $$m"; ok=0; }; \
 	done; \

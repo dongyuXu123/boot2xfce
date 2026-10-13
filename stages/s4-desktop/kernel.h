@@ -80,8 +80,10 @@ static inline void enable_paging(void) {
     __asm__ volatile("mov %0,%%cr0" :: "r"(cr0 | 0x80000000u));
 }
 
-/* ---------- console.c ---------- */
+/* ---------- console.c（照 vt.c 的 VGA 控制台） ---------- */
 void console_init(void);
+void console_write(const char *s, uint32_t n);
+void console_clear(void);
 void print(const char *s);              /* 串口 + VGA 双路 */
 void print_hex(uint32_t v);
 void print_dec(uint32_t v);
@@ -136,9 +138,9 @@ int  ramfs_mkdir(const char *path);
 int  ramfs_rm(const char *path);
 int  ramfs_chdir(const char *path);
 int  ramfs_getcwd(char *buf, int max);
-void ramfs_list(const char *path);      /* 打印目录内容 */
+void ramfs_list(const char *path);      /* 打印目录内容（0=当前目录） */
 struct vnode;
-struct vnode *ramfs_lookup_vnode(const char *name);
+struct vnode *ramfs_lookup_vnode(const char *path);
 
 /* ---------- file.c（S3-M5 VFS + fd 表） ---------- */
 struct task;                                 /* 前置声明（task_t 在下文 typedef） */
@@ -157,22 +159,14 @@ int  fd_close(struct task *t, int fd);
 int  fd_lseek(struct task *t, int fd, int32_t off, int whence);
 int  uptr_ok(uint32_t va, uint32_t n);            /* 用户指针范围校验 */
 
-/* ---------- fb.c / win.c（S4 图形） ---------- */
+/* ---------- fb.c（S4 LFB 图元） ---------- */
 void fb_init(void);
 void fb_pixel(uint32_t x, uint32_t y, uint32_t rgb);
 void fb_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t rgb);
 void fb_blit(void);
 void fb_char(uint32_t x, uint32_t y, char c, uint32_t rgb);
 void fb_text(uint32_t x, uint32_t y, const char *s, uint32_t rgb);
-void gfx_start(void);
-void gfx_task(void);
-int  gfx_active(void);
-int  gfx_spawn_window(uint32_t pid, const char *title);
-void gfx_on_exit(uint32_t pid);
-int  tty_read_window(uint32_t pid, char *out, int max);
-void tty_write_window(uint32_t pid, const char *s);
 extern uint32_t fb_addr, fb_pitch, fb_w, fb_h;
-extern struct mb_info *g_mb;
 
 /* ---------- mouse.c（S4 PS/2 鼠标） ---------- */
 void mouse_init(void);
@@ -181,6 +175,15 @@ int  mouse_pop(uint8_t *btn, int16_t *dx, int16_t *dy);
 
 /* ---------- rtc.c（S4 实时钟） ---------- */
 uint32_t rtc_time(void);
+
+/* ---------- gfx/win（S4 桌面） ---------- */
+void gfx_start(void);
+void gfx_task(void);
+int  gfx_active(void);
+int  gfx_spawn_window(uint32_t pid, const char *title);
+void gfx_on_exit(uint32_t pid);
+int  tty_read_window(uint32_t pid, char *out, int max);
+void tty_write_window(uint32_t pid, const char *s);
 
 /* ---------- tty.c（S3-M6 行规程） ---------- */
 void tty_init(void);
@@ -218,9 +221,9 @@ extern task_t *current;
 void tasks_init(void);
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
-uint32_t task_wait_scan(uint32_t pid);                /* 收尸一个死子，返回其 pid */
+uint32_t task_wait_scan(uint32_t pid);
+int  task_spawn(const char *path, uint32_t ppid, const char *title);                /* 收尸一个死子，返回其 pid */
 int  task_exec_image(task_t *t, const char *name);    /* ELF 换像（M4） */
-int  task_spawn(const char *path, uint32_t ppid, const char *title);
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));
 void task_yield(void);                  /* 内核任务主动让出 CPU */

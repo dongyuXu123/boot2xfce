@@ -7,19 +7,17 @@ static int streq(const char *a, const char *b) {
 }
 
 void user_main(void) {
-    sys(11, (intptr_t)"/dev/tty", 0, 0);         /* fd0 = 本窗 tty：读键入+写输出 */
+    sys(11, (intptr_t)"/dev/tty", 0, 0);         /* fd0 = 键盘行规程 */
     uprint("\n[sh] shell ready\n");
     char line[100];
     for (;;) {
-        sys(13, 0, (intptr_t)"sh> ", 4);
+        uprint("sh> ");
         long n = sys(12, 0, (intptr_t)line, 90); /* 阻塞读一行 */
         if (n <= 0) continue;
+        if (line[n - 1] == '\n') line[n - 1] = 0; else line[n] = 0;
         if (line[0] == 0) continue;
-        if (n > 0 && line[n-1] == '\n') line[n-1] = 0; else line[n] = 0;
-        if (streq(line, "clear")) {
-            sys(13, 0, (intptr_t)"\f", 1);       /* 窗口清屏 */
-        } else if (streq(line, "help")) {
-            uprint("cmds: ls cd mkdir rm pwd cat run hello echo gfx calc clock notepad help\n");
+        if (streq(line, "help")) {
+            uprint("cmds: ls [p] cd p mkdir p rm p pwd cat f run hello echo s gfx help\n");
         } else if (streq(line, "pwd")) {
             char b[128];
             sys(21, (intptr_t)b, 127, 0);
@@ -42,6 +40,16 @@ void user_main(void) {
                 uprint("\n");
                 sys(14, fd, 0, 0);
             }
+        } else if (streq(line, "run hello")) {
+            long pid = sys(7, 0, 0, 0);          /* fork */
+            if (pid == 0) {
+                sys(10, (intptr_t)"/bin/hello", 0, 0);   /* execve */
+                uprint("sh: exec failed\n");
+                sys(3, 0, 0, 0);
+            } else {
+                sys(8, 0, 0, 0);                 /* wait 收尸 */
+                uprint("[sh] child done\n");
+            }
         } else if (streq(line, "gfx")) {
             uprint("entering gfx (keyboard goes to GUI)\n");
             sys(17, 0, 0, 0);
@@ -55,16 +63,6 @@ void user_main(void) {
             } else {
                 sys(8, 0, 0, 0);
                 uprint("[sh] app exited\n");
-            }
-        } else if (streq(line, "run hello")) {
-            long pid = sys(7, 0, 0, 0);          /* fork */
-            if (pid == 0) {
-                sys(10, (intptr_t)"/bin/hello", 0, 0);   /* execve */
-                uprint("sh: exec failed\n");
-                sys(3, 0, 0, 0);
-            } else {
-                sys(8, 0, 0, 0);                 /* wait 收尸 */
-                uprint("[sh] child done\n");
             }
         } else if (line[0]=='e' && line[1]=='c' && line[2]=='h' && line[3]=='o' && line[4]==' ') {
             uprint(line + 5);

@@ -80,8 +80,10 @@ static inline void enable_paging(void) {
     __asm__ volatile("mov %0,%%cr0" :: "r"(cr0 | 0x80000000u));
 }
 
-/* ---------- console.c ---------- */
+/* ---------- console.c（照 vt.c 的 VGA 控制台） ---------- */
 void console_init(void);
+void console_write(const char *s, uint32_t n);
+void console_clear(void);
 void print(const char *s);              /* 串口 + VGA 双路 */
 void print_hex(uint32_t v);
 void print_dec(uint32_t v);
