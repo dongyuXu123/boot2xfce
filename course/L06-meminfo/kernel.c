@@ -104,9 +104,10 @@ void kmain(uint32_t magic, struct mb_info *mb) {
          *   "S1: mem lower=<mem_lower>KB, upper=<mem_upper/1024>MB\n"
          * 提示：print / print_dec 已经给你了，除法用 /1024 换 MB。 */
         print("S1: mem lower=");
-        /* ↓↓↓ 在这一行后面写你的代码 ↓↓↓ */
-
-        /* ↑↑↑ 写到这里 ↑↑↑ */
+        print_dec(mb->mem_lower);
+        print("KB, upper=");
+        print_dec(mb->mem_upper / 1024);
+        print("MB");
         print("\n");
     }
 #endif

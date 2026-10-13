@@ -1,4 +1,13 @@
-/* L14 桩 —— 任务表 / 创建 / 轮转调度（task_a/b/kbd_task 给定，L18 用） */
+/* task.c —— 任务表 / 创建 / 轮转调度 / 内核任务样例
+ *
+ * 模型（xv6 风格，也是现代 Linux 的做法）：
+ *   - 每个任务一根 kmalloc 出来的 4KiB 内核栈；
+ *   - 中断现场自然压在"被打断任务"的栈上；
+ *   - schedule() 在中断处理里用 switch_to 换栈换上下文；
+ *   - 新任务的 kctx.eip 指到蹦床：内核任务→ktask_trampoline，
+ *     用户任务→utask_trampoline（iret 降级 ring3）。
+ *   首次调度前 sched_loop 在主栈上空转，它自己不再被切回。
+ */
 #include "kernel.h"
 
 #define MAX_TASKS 16
@@ -9,14 +18,19 @@ static uint32_t next_pid = 1;
 
 extern void utask_trampoline(void);     /* cpu.asm */
 
-/* 内核任务蹦床：入口函数跑完 → 标记 DEAD → 永久休眠（栈留到 S3 收尸） */
+/* 内核任务蹦床：入口函数跑完 → 标记 DEAD → 永久休眠（栈留在那儿，S3 收尸） */
 static void ktask_trampoline(void) {
-    /* TODO(你来写·L14): 三步——
-     * 1) sti()   ← 别漏！switch_to 不保存 EFLAGS，第一次被切进来时 IF
-     *              还是中断门清掉的 0，硬件中断从此全瞎（L18 会实测）
-     * 2) 执行 current->entry()
-     * 3) current->state 置 T_DEAD，然后 for(;;) hlt();
-     * 想想为什么 entry() 之前 current 已经指向本任务（谁设置的？何时？） */
+    /* switch_to 不保存 EFLAGS：第一次被切进来时 IF 还停在上一现场
+     * （中断门把它清了）。这里 sti 重建"任务恒在 IF=1 下运行"的不变量，
+     * 之后的 IF 由各任务的 iret 帧天然保存/恢复。
+     * （此 bug 由 L18 的 sendkey 实测揪出：症状是 PIC 的 IRR 里 IRQ1
+     *   永远 pending——整个系统只剩软触发中断在跑。） */
+    sti();
+    current->entry();
+    current->state = T_DEAD;
+    print("S2: task ");
+    print_dec(current->pid);
+    print(" exited\n");
     for (;;) hlt();
 }
 
@@ -29,40 +43,102 @@ void tasks_init(void) {
 }
 
 task_t *task_create(void (*entry)(void), int is_user) {
-    /* TODO(你来写·L14):
-     * 1) 找一个 T_EMPTY 槽位，memset 清零
-     * 2) 填 pid(自增)/T_READY/entry/is_user
-     * 3) kstack = kmalloc(4096)，kstack_top = kstack+4096
-     * 4) 【本课灵魂】在"新任务自己的内核栈顶"布置初始 context：
-     *      struct context *ctx = kstack_top - sizeof(struct context);
-     *      清零后 ctx->eip = 蹦床地址（内核任务 ktask_trampoline，
-     *      用户任务 utask_trampoline）；t->kesp = (uint32_t)ctx
-     *    ⚠ 绝不能把 &tasks[i].kctx 之类的地址当 kesp——那等于把
-     *      .bss 里的结构体当栈用，第一次切换就把任务表踩穿
-     *      （全课程最毒的坑，欢迎踩完再来读这段注释）
-     * 5) is_user 时填 utask_eip=USER_BASE, utask_esp=USER_TOP
-     */
-    (void)entry; (void)is_user;
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state != T_EMPTY) continue;
+        task_t *t = &tasks[i];
+        memset(t, 0, sizeof(*t));
+        t->pid        = next_pid++;
+        t->state      = T_READY;
+        t->entry      = entry;
+        t->is_user    = is_user;
+        t->kstack     = kmalloc(4096);
+        if (!t->kstack) return NULL;
+        t->kstack_top = (uint32_t)(uintptr_t)t->kstack + 4096;
+        /* 初始 context 布在【新任务自己的内核栈顶】（xv6 式）：
+         * switch_to 加载 kesp 后，pops/ret 都发生在真实栈上，
+         * ret 直接进蹦床。绝不能把任务结构体当栈用。 */
+        struct context *ctx = (struct context *)(uintptr_t)
+                              (t->kstack_top - sizeof(struct context));
+        memset(ctx, 0, sizeof(*ctx));
+        ctx->eip = (uint32_t)(uintptr_t)
+                   (is_user ? (void *)utask_trampoline : (void *)ktask_trampoline);
+        t->kesp = (uint32_t)(uintptr_t)ctx;
+        if (is_user) {                  /* ring3 进入点：当前只支持一个用户任务 */
+            utask_eip = USER_BASE;
+            utask_esp = USER_TOP;
+        }
+        return t;
+    }
     return NULL;
 }
 
 /* 时间片轮转：从上次调度的下一个槽位开始找 READY */
 void schedule(void) {
-    /* TODO(你来写·L14):
-     * 1) static int last = -1; 从 last+1 起环形扫描 T_READY
-     * 2) 没找到就直接 return（全死光了也别崩）
-     * 3) prev->state: RUNNING→READY；current=next；next->state=RUNNING
-     * 4) next->is_user 时 tss_set_esp0(next->kstack_top)
-     * 5) switch_to(&prev->kesp, next->kesp)
-     * 想想：为什么 prev 要先取出来？为什么 RUNNING(不是 READY)的任务跳过？ */
+    static int last = -1;
+    task_t *prev = current;
+    task_t *next = NULL;
+    for (int i = 1; i <= MAX_TASKS; i++) {
+        task_t *t = &tasks[(last + i) % MAX_TASKS];
+        if (t->state == T_READY) { next = t; last = (int)(t - tasks); break; }
+    }
+    if (!next) return;
+    if (prev->state == T_RUNNING) prev->state = T_READY;
+    current = next;
+    next->state = T_RUNNING;
+    if (next->is_user) tss_set_esp0(next->kstack_top);
+    switch_to(&prev->kesp, next->kesp);
 }
 
 void sched_loop(void) {                 /* 主 CPU 变成调度器，永不再返回 */
-    /* TODO(你来写·L14): for(;;) { sti(); hlt(); schedule(); }
-     * 想想：sti 在 hlt 前还是后？为什么这样写 idle 也不丢 tick？ */
-    for (;;) { cli(); hlt(); }
+    for (;;) {
+        sti();
+        hlt();                          /* 等 tick */
+        schedule();
+    }
 }
 
 void task_yield(void) {                 /* 内核任务主动让出：软触发时钟中断 */
-    /* TODO(你来写·L14): 一行内联汇编，软触发 vector 0x20（=IRQ0 的门） */
+    __asm__ volatile("int $0x20");
+}
+
+/* ---------- 示例内核任务 ---------- */
+void task_a(void) {
+    int runs = 0;
+    for (;;) {
+        if (runs < 3) {
+            print("taskA run ");
+            print_dec((uint32_t)(runs + 1));
+            print("\n");
+        }
+        runs++;
+        task_yield();
+    }
+}
+
+void task_b(void) {
+    int runs = 0;
+    for (;;) {
+        if (runs < 3) {
+            print("taskB run ");
+            print_dec((uint32_t)(runs + 1));
+            print("\n");
+        }
+        runs++;
+        task_yield();
+    }
+}
+
+void kbd_task(void) {                   /* 有键回显（无头测试时静默） */
+    for (;;) {
+        int c;
+        while ((c = kbd_pop()) >= 0) {
+            if (c >= 32 && c < 127) {
+                char b[2] = { (char)c, 0 };
+                print("kbd: ");
+                print(b);
+                print("\n");
+            }
+        }
+        task_yield();
+    }
 }

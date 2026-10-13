@@ -1,6 +1,4 @@
-/* L08 桩 —— 双路 console：串口 + VGA 文本
- * memset/memcpy 给定（它们是全内核的工具）；你写输出三件套 + 初始化。
- * 验收：kmain 用你的 print 打出 "S2: console OK"（桩是哑的，必然 FAIL）。 */
+/* console.c —— 串口(COM1) + VGA 文本双路输出，及最基础字符串函数 */
 #include "kernel.h"
 
 #define VGA_MEM ((volatile uint16_t *)0xB8000)
@@ -21,36 +19,51 @@ void *memcpy(void *d, const void *s, uint32_t n) {
 }
 
 static void serial_init(void) {
-    /* TODO(你来写·L08): 初始化 COM1 115200 8N1 + FIFO
-     * 对照 stages/s2-kernel-core/console.c 的答案（或 L02 课你的记忆）*/
+    outb(COM1 + 1, 0x00);
+    outb(COM1 + 3, 0x80);
+    outb(COM1,     0x01);              /* 115200 8N1 */
+    outb(COM1 + 1, 0x00);
+    outb(COM1 + 3, 0x03);
+    outb(COM1 + 2, 0xC7);
+    outb(COM1 + 4, 0x0B);
 }
-
 static void serial_putc(char c) {
-    /* TODO(你来写·L08): 轮询 LSR bit5 后把字符写进 COM1 */
-    (void)c;
+    while (!(inb(COM1 + 5) & 0x20)) ;
+    outb(COM1, (uint8_t)c);
 }
-
 static void vga_putc(char c) {
-    /* TODO(你来写·L08): 写 0xB8000 文本缓冲
-     * '\n' 换行回车；一行 80 列；25 行满则回卷到第 0 行 */
-    (void)c;
+    if (c == '\n') { vga_row++; vga_col = 0; }
+    else {
+        VGA_MEM[vga_row * 80 + vga_col] = (uint16_t)(0x0700 | (uint8_t)c);
+        if (++vga_col >= 80) { vga_row++; vga_col = 0; }
+    }
+    if (vga_row >= 25) { vga_row = 0; vga_col = 0; }
 }
 
 void console_init(void) {
-    /* TODO(你来写·L08): serial_init + 清屏(0x0720 空格) + 光标归位(row=1,col=0) */
+    serial_init();
+    for (int i = 0; i < 80 * 25; i++) VGA_MEM[i] = 0x0720;
+    vga_row = 1; vga_col = 0;
 }
 
 void print(const char *s) {
-    /* TODO(你来写·L08): 每个字符同时走 serial_putc 和 vga_putc */
-    (void)s;
+    for (; *s; s++) {
+        serial_putc(*s);
+        vga_putc(*s);
+    }
 }
 
 void print_hex(uint32_t v) {
-    /* TODO(你来写·L08): 打 0x 前缀 + 8 位小写十六进制（可用局部缓冲+print） */
-    (void)v;
+    static const char h[] = "0123456789abcdef";
+    char buf[11] = "0x";
+    for (int i = 0; i < 8; i++) buf[2 + i] = h[(v >> ((7 - i) * 4)) & 0xF];
+    print(buf);
 }
 
 void print_dec(uint32_t v) {
-    /* TODO(你来写·L08): 从个位往回填缓冲，再 print（想想 0 要打 "0"） */
-    (void)v;
+    char b[11];
+    int i = 10;
+    b[i] = 0;
+    do { b[--i] = (char)('0' + v % 10); v /= 10; } while (v);
+    print(&b[i]);
 }

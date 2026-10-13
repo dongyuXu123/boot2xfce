@@ -1,6 +1,4 @@
-/* L10 桩 —— IDT：256 个中断门
- * 0-31 CPU 异常（ring0 门 0x8E），32-47 IRQ，0x80 系统调用（DPL3 门 0xEE）。
- * 验收：sidt 读出的 limit 必须是 256*8-1=2047，基址须落在内核镜像区。 */
+/* idt.c —— 256 个中断门：0-31 异常 / 32-47 IRQ / 0x80 系统调用(DPL=3) */
 #include "kernel.h"
 
 struct idt_entry {
@@ -21,7 +19,6 @@ static struct idt_ptr   idtp;
 extern void *isr_table[];
 
 static void idt_set(int n, uint32_t handler, uint8_t flags) {
-    /* 给定：一个门 = 段内偏移拆两半 + 选择子 + 属性 */
     idt[n].base_lo = handler & 0xFFFF;
     idt[n].base_hi = (handler >> 16) & 0xFFFF;
     idt[n].sel     = 0x08;
@@ -30,9 +27,12 @@ static void idt_set(int n, uint32_t handler, uint8_t flags) {
 }
 
 void idt_init(void) {
-    /* TODO(你来写·L10):
-     * 1) memset 清零 idt
-     * 2) 0..47 号门：handler = isr_table[i]，flags=0x8E
-     * 3) 0x80 号门：handler = isr_table[48]，flags=0xEE（DPL=3，用户可调）
-     * 4) 填 idtp（limit/base），lidt 生效 */
+    memset(idt, 0, sizeof(idt));
+    for (int i = 0; i < 48; i++)
+        idt_set(i, (uint32_t)isr_table[i], 0x8E);      /* ring0 门 */
+    idt_set(0x80, (uint32_t)isr_table[48], 0xEE);      /* DPL=3：用户可调 */
+
+    idtp.limit = sizeof(idt) - 1;
+    idtp.base  = (uint32_t)idt;
+    __asm__ volatile("lidt %0" : : "m"(idtp));
 }

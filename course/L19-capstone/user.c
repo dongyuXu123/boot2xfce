@@ -33,7 +33,15 @@ void user_main(void) {
     uprint("[user] uptime=");
     uprint_dec(sys(4, 0, 0, 0));
     uprint(" ticks\n");
-    sys(5, 0, 0, 0);                    /* ls：内核侧打印 ramfs 文件表 */
+    {   /* 毕业设计：用新系统调用 6 把一块用户内存写进 ramfs */
+        const char *nm = "cap.txt";
+        const char *ct = "L19 capstone\n";
+        long r = sys(6, (intptr_t)nm, (intptr_t)ct, 13);
+        uprint("[capstone] writefile ret=");
+        uprint_dec(r);
+        uprint("\n");
+    }
+    sys(5, 0, 0, 0);                    /* ls：文件表里应出现 cap.txt(13B) */
     sys(3, 0, 0, 0);                    /* exit */
     for (;;) ;                          /* DEAD 后不会再被调度，保险空转 */
 }

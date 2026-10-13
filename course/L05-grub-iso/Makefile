@@ -1,4 +1,4 @@
-# L05 桩 —— 构建规则：只有 iso 规则是你的作业，其余照旧
+# L05 解答 —— 构建规则（课程模板 Makefile + iso 规则落解）
 CC    ?= gcc
 LD    ?= ld
 NASM  ?= nasm
@@ -27,14 +27,12 @@ $(B)/kernel.o: kernel.c progress.h | $(B)
 $(B)/kernel.elf: $(B)/boot.o $(B)/kernel.o kernel.ld | $(B)
 	$(LD) $(LDFLAGS) -o $@ $(B)/boot.o $(B)/kernel.o
 
-# TODO(你来写·L05): 补全 ISO 制作
-# 步骤：
-#   1) rm -rf $(B)/iso 并 mkdir -p $(B)/iso/boot/grub
-#   2) cp $(B)/kernel.elf 到 $(B)/iso/boot/kernel.elf
-#   3) cp iso/boot/grub/grub.cfg 到 $(B)/iso/boot/grub/
-#   4) grub-mkrescue -o $@ $(B)/iso
+# L05 解答：ISO 制作四步——摆目录 → 拷内核 → 拷配置 → grub-mkrescue
 $(B)/boot.iso: $(B)/kernel.elf iso/boot/grub/grub.cfg
-	echo "TODO(L05): 亲手写这个规则（见任务书）" && false
+	rm -rf $(B)/iso && mkdir -p $(B)/iso/boot/grub
+	cp $(B)/kernel.elf $(B)/iso/boot/kernel.elf
+	cp iso/boot/grub/grub.cfg $(B)/iso/boot/grub/grub.cfg
+	grub-mkrescue -o $@ $(B)/iso > /dev/null 2>&1
 
 test: $(B)/boot.iso
 	@rm -f $(B)/serial.log

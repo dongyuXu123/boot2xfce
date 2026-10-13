@@ -1,31 +1,40 @@
-; ================================================================
-; L04 桩 —— Multiboot 头与链接脚本（从 MBR 时代切到 ELF 内核）
-; kernel.c 已给定（会打印 S1: GRUB boot OK），你负责让 GRUB 认识它：
-;   1) boot.asm: 合法的 Multiboot 1 头（三件套 + 栈 + 进 kmain）
-;   2) kernel.ld: 把内核放到物理 1MiB 的链接脚本
-; ================================================================
+; ============================================================
+; S1 —— 把引导权交给 GRUB（Multiboot 1 规范）
+;
+; S0 里我们自己站在 0x7C00；从 S1 起，加电后先跑 GRUB：
+;   BIOS → GRUB 引导映像 → grub.cfg 的 `multiboot /boot/kernel.elf`
+;   → GRUB 按 Multiboot 头加载内核到 1MiB，跳到入口，并把
+;     eax=0x2BADB002（魔数）、ebx=信息结构指针 交给内核。
+;
+; Multiboot 头必须位于 ELF 前 8K 内、4 字节对齐：
+;   magic=0x1BADB002, flags=0x3（按 4K 页对齐加载 + 传内存大小），
+;   checksum = -(magic+flags)
+; ============================================================
 [BITS 32]
 
-; TODO(你来写·L04): Multiboot 1 头三件套（必须 4 字节对齐、位于文件前 8K）
-;   magic     = 0x1BADB002
-;   flags     = 0x3           （页对齐 + 内存信息。多一位 GRUB 都拒载！）
-;   checksum  = -(magic+flags)
-; 然后是 32 位入口 _start：关中断 → 设栈(stack_top) → push ebx(信息结构)
-;   → push eax(魔数) → call kmain → hlt 死循环
-;   栈区放 .bss：resb 16384
+MBOOT_MAGIC    equ 0x1BADB002
+MBOOT_FLAGS    equ 0x00000003
+MBOOT_CHECKSUM equ -(MBOOT_MAGIC + MBOOT_FLAGS)
+
 section .multiboot
 align 4
-    dd 0                        ; TODO: 替换我（magic）
-    dd 0                        ; TODO: 替换我（flags）
-    dd 0                        ; TODO: 替换我（checksum）
+    dd MBOOT_MAGIC
+    dd MBOOT_FLAGS
+    dd MBOOT_CHECKSUM
 
 section .text
 global _start
 extern kmain
 
 _start:
+    cli
+    mov esp, stack_top      ; 建自己的栈
+    push ebx                ; 参数2: multiboot 信息结构物理地址
+    push eax                ; 参数1: 魔数（应为 0x2BADB002）
+    call kmain
+.hang:
     hlt
-    jmp _start                  ; TODO: 替换我（建栈、传参、调 kmain）
+    jmp .hang
 
 section .bss
 align 16

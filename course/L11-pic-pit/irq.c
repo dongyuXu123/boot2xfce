@@ -1,31 +1,37 @@
-/* L11 桩 —— 8259A PIC 重映射 + PIT 时钟（键盘先给定）
- * 验收：sti 之后 ticks 必须自己走到 3——桩是哑的，永远过不去。 */
+/* irq.c —— 8259A PIC 重映射 / PIT 定时器 / 键盘 / 中断 C 侧分发 */
 #include "kernel.h"
 
 volatile uint32_t ticks = 0;
 volatile uint32_t isr_err_code = 0;     /* isr.asm 从异常栈上弹下来的错误码 */
 
-/* ---------- 8259A：把 IRQ 重映射到 0x20-0x2F ---------- */
+/* ---------- 8259A：把 IRQ 重映射到 0x20-0x2F，避开 CPU 异常区 ---------- */
 #define PIC1_CMD 0x20
 #define PIC1_DAT 0x21
 #define PIC2_CMD 0xA0
 #define PIC2_DAT 0xA1
 
 void pic_init(void) {
-    /* TODO(你来写·L11): ICW1-ICW4 四步初始化 + 屏蔽字
-     * 主从都发 ICW1=0x11 → ICW2 偏移 0x20/0x28 → ICW3 级联 0x04/0x02
-     * → ICW4=0x01 → 屏蔽：主片 0xF8(只放 IRQ0/1/2)，从片 0xFF
-     * 不重映射会怎样？IRQ0 会撞上 CPU 异常 8 号门——试试就逝世。 */
+    outb(PIC1_CMD, 0x11);               /* ICW1: 级联+ICW4 */
+    outb(PIC2_CMD, 0x11);
+    outb(PIC1_DAT, 0x20);               /* ICW2: 主片偏移 0x20 */
+    outb(PIC2_DAT, 0x28);               /*       从片偏移 0x28 */
+    outb(PIC1_DAT, 0x04);               /* ICW3: 主片 IRQ2 接从片 */
+    outb(PIC2_DAT, 0x02);
+    outb(PIC1_DAT, 0x01);               /* ICW4: 8086 模式 */
+    outb(PIC2_DAT, 0x01);
+    outb(PIC1_DAT, 0xF8);               /* 屏蔽字：只放行 IRQ0(时钟) IRQ1(键盘) IRQ2(级联) */
+    outb(PIC2_DAT, 0xFF);               /* 从片全屏蔽 */
 }
 
-/* ---------- 8253/8254 PIT：通道 0 方波 ---------- */
+/* ---------- 8253/8254 PIT：通道 0 方波，驱动调度 ---------- */
 void pit_init(uint32_t hz) {
-    /* TODO(你来写·L11): 除数 = 1193182/hz
-     * 0x43 写 0x36（通道0|方波|先低后高），0x40 写除数低/高字节 */
-    (void)hz;
+    uint32_t div = 1193182 / hz;
+    outb(0x43, 0x36);                   /* 通道0 | 方波 | 先低后高 */
+    outb(0x40, div & 0xFF);
+    outb(0x40, (div >> 8) & 0xFF);
 }
 
-/* ---------- 键盘（IRQ1）：给定，L18 才轮到你写 ---------- */
+/* ---------- 键盘（IRQ1）：PS/2 set 1 通码 → ASCII 环形缓冲 ---------- */
 static uint8_t kbuf[32];
 static int kbuf_head, kbuf_tail;
 
@@ -55,7 +61,7 @@ int kbd_pop(void) {
     return c;
 }
 
-/* ---------- 异常现场转储（给定） ---------- */
+/* ---------- 异常现场转储（教学用：崩了能看见在哪） ---------- */
 static void fault_dump(struct regs *r) {
     cli();
     print("\nS2: FAULT int_no=");
@@ -73,7 +79,7 @@ static void fault_dump(struct regs *r) {
     for (;;) hlt();
 }
 
-/* ---------- 统一分发（给定：isr.asm 把所有入口汇到这里） ---------- */
+/* ---------- 统一分发：isr.asm 把所有入口汇到这里 ---------- */
 void isr_dispatch(struct regs *r) {
     if (r->int_no < 32) {
         fault_dump(r);                  /* CPU 异常：教学内核直接停机 */

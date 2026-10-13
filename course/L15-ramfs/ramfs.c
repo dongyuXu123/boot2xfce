@@ -1,6 +1,5 @@
-/* L15 桩 —— 内存盘 ramfs：固定文件表，每文件 512B
- * name_eq/lookup/ramfs_list 给定；你写 init/write/read。
- * 验收：写 "hello,ramfs!\n"(13B) 读回必须逐字节一致。 */
+/* ramfs.c —— 最小内存盘：固定文件表，每文件 512B 内容
+ * 提供 create/write（合一）/read/list；目录与动态容量是 S3 的事。 */
 #include "kernel.h"
 
 #define MAX_FILES   8
@@ -14,7 +13,11 @@ struct rfile {
 };
 static struct rfile files[MAX_FILES];
 
-static int name_eq(const char *a, const char *b) {   /* 16 字符内 strcmp（给定） */
+void ramfs_init(void) {
+    memset(files, 0, sizeof(files));
+}
+
+static int name_eq(const char *a, const char *b) {   /* 16 字符内 strcmp */
     for (int i = 0; i < 16; i++) {
         if (a[i] != b[i]) return 0;
         if (!a[i]) return 1;
@@ -22,33 +25,41 @@ static int name_eq(const char *a, const char *b) {   /* 16 字符内 strcmp（�
     return 1;
 }
 
-static struct rfile *lookup(const char *name) {      /* 给定 */
+static struct rfile *lookup(const char *name) {
     for (int i = 0; i < MAX_FILES; i++)
         if (files[i].used && name_eq(files[i].name, name))
             return &files[i];
     return NULL;
 }
 
-void ramfs_init(void) {
-    /* TODO(你来写·L15): 清空文件表（想想为什么 memset 整个数组就够） */
-}
-
 int ramfs_write(const char *name, const void *buf, uint32_t len) {
-    /* TODO(你来写·L15):
-     * 1) len 超过 FILE_MAX 就截断
-     * 2) lookup 已有文件；没有就找空槽创建（名字逐字符拷，注意留 \0）
-     * 3) 表满返回 -1；拷数据、记 size，返回写入长度 */
-    (void)name; (void)buf; (void)len;
-    return -1;
+    if (len > FILE_MAX) len = FILE_MAX;
+    struct rfile *f = lookup(name);
+    if (!f) {                                   /* 不存在则创建 */
+        for (int i = 0; i < MAX_FILES; i++) {
+            if (files[i].used) continue;
+            f = &files[i];
+            memset(f, 0, sizeof(*f));
+            for (int j = 0; j < 15 && name[j]; j++) f->name[j] = name[j];
+            f->used = 1;
+            break;
+        }
+        if (!f) return -1;
+    }
+    memcpy(f->data, buf, len);
+    f->size = len;
+    return (int)len;
 }
 
 int ramfs_read(const char *name, void *buf, uint32_t max) {
-    /* TODO(你来写·L15): 找不到返回 -1；拷 min(size,max)，返回实际长度 */
-    (void)name; (void)buf; (void)max;
-    return -1;
+    struct rfile *f = lookup(name);
+    if (!f) return -1;
+    uint32_t n = f->size < max ? f->size : max;
+    memcpy(buf, f->data, n);
+    return (int)n;
 }
 
-void ramfs_list(void) {                              /* 给定 */
+void ramfs_list(void) {
     print("S2: ramfs ls:");
     for (int i = 0; i < MAX_FILES; i++) {
         if (!files[i].used) continue;

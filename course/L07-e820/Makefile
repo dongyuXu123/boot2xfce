@@ -42,11 +42,12 @@ test: $(B)/boot.iso
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] 缺少标记: $$m"; ok=0; }; \
 	done; \
 	if [ $(L) -ge 6 ]; then \
-		grep -qF "S1: mem upper=" $(B)/serial.log || { echo "[FAIL] 缺少标记: S1: mem upper="; ok=0; }; \
+		grep -qF "S1: mem lower=" $(B)/serial.log || { echo "[FAIL] 缺少标记: S1: mem lower="; ok=0; }; \
+		grep -qF "KB, upper="    $(B)/serial.log || { echo "[FAIL] 缺少标记: KB, upper="; ok=0; }; \
 	fi; \
 	if [ $(L) -ge 7 ]; then \
 		grep -qF "S1: mmap entries=" $(B)/serial.log || { echo "[FAIL] 缺少标记: S1: mmap entries="; ok=0; }; \
-		grep -qF "S1: mmap base=" $(B)/serial.log || { echo "[FAIL] 缺少标记: S1: mmap base=（逐条打印）"; ok=0; }; \
+		grep -qF "mmap base="       $(B)/serial.log || { echo "[FAIL] 缺少标记: mmap base=（逐条打印）"; ok=0; }; \
 	fi; \
 	[ $$ok = 1 ] && echo "[PASS] L$(L)" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }
 

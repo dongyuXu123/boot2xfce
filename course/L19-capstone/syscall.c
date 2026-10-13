@@ -40,6 +40,24 @@ void syscall_dispatch(struct regs *r) {
         ramfs_list();
         r->eax = 0;
         break;
+    case 6: {                                   /* writefile(name, buf, len)
+                                                   毕业设计：用户态可写 ramfs。
+                                                   name/buf 是用户指针——无分页
+                                                   时代同一地址空间可直用；
+                                                   S3 开分页后必须先拷进内核 */
+        static char kname[16];
+        static char kbuf[256];
+        uint32_t n = r->edx;
+        if (n > 255) n = 255;
+        for (int i = 0; i < 15; i++) {
+            kname[i] = ((char *)(uintptr_t)r->ebx)[i];
+            if (!kname[i]) break;
+        }
+        kname[15] = 0;
+        memcpy(kbuf, (void *)(uintptr_t)r->ecx, n);
+        r->eax = (uint32_t)ramfs_write(kname, kbuf, n);
+        break;
+    }
     default:
         r->eax = (uint32_t)-1;
         break;

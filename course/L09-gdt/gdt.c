@@ -1,6 +1,7 @@
-/* L09 桩 —— GDT：5 个段描述符 + TSS
- * 平坦模型：内核码/数据 DPL0，用户码/数据 DPL3，第 5 项 TSS。
- * 验收：sgdt 读出的 limit 必须是 6*8-1=47（kmain 自检）。 */
+/* gdt.c —— 5 个段描述符 + TSS（ring3 系统调用需要 esp0）
+ * 平坦模型：内核码/数据 0-4GiB DPL0，用户码/数据 0-4GiB DPL3。
+ * 注意：没有分页，ring3 与 ring0 共享同一地址空间（无隔离）——
+ * 真正的用户态保护等 S3 开启分页后再说。 */
 #include "kernel.h"
 
 struct gdt_entry {
@@ -25,7 +26,6 @@ static struct gdt_entry gdt[6];
 struct gdt_ptr   gp;      /* cpu.asm 的 gdt_flush 要引用，不能 static */
 
 static void gdt_set(int i, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
-    /* 给定：把 base/limit/access 拆进描述符（想想为什么 limit 分两处、gran 低位放什么） */
     gdt[i].base_low  = base & 0xFFFF;
     gdt[i].base_mid  = (base >> 16) & 0xFF;
     gdt[i].base_high = (base >> 24) & 0xFF;
@@ -40,14 +40,16 @@ void tss_set_esp0(uint32_t esp0) {
 }
 
 void gdt_init(void) {
-    /* TODO(你来写·L09): 填 6 个描述符并生效
-     * 0: null
-     * 1: 0x08 内核代码  base=0 limit=0xFFFFF access=0x9A gran=0xCF
-     * 2: 0x10 内核数据  access=0x92
-     * 3: 0x18 用户代码  access=0xFA
-     * 4: 0x20 用户数据  access=0xF2
-     * 5: 0x28 TSS       base=&tss limit=sizeof(tss)-1 access=0x89 gran=0
-     * 然后: gp.limit=sizeof(gdt)-1; gp.base=(uint32_t)gdt;
-     *       gdt_flush((uint32_t)&gp);  tss_flush();  tss_set_esp0(0);
-     * 想想 access 的高 4 位(9/F)和 gran 的 0xCF 各是什么意思，写注释！ */
+    gdt_set(0, 0, 0, 0x00, 0x00);                  /* null */
+    gdt_set(1, 0, 0xFFFFF, 0x9A, 0xCF);            /* 0x08 内核码 */
+    gdt_set(2, 0, 0xFFFFF, 0x92, 0xCF);            /* 0x10 内核数据 */
+    gdt_set(3, 0, 0xFFFFF, 0xFA, 0xCF);            /* 0x18 用户码 */
+    gdt_set(4, 0, 0xFFFFF, 0xF2, 0xCF);            /* 0x20 用户数据 */
+    gdt_set(5, (uint32_t)&tss, sizeof(tss) - 1, 0x89, 0x00); /* 0x28 TSS */
+
+    gp.limit = sizeof(gdt) - 1;
+    gp.base  = (uint32_t)gdt;
+    gdt_flush((uint32_t)&gp);
+    tss_flush();
+    tss_set_esp0(0);
 }

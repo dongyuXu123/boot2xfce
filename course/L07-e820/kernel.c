@@ -104,25 +104,31 @@ void kmain(uint32_t magic, struct mb_info *mb) {
          *   "S1: mem lower=<mem_lower>KB, upper=<mem_upper/1024>MB\n"
          * 提示：print / print_dec 已经给你了，除法用 /1024 换 MB。 */
         print("S1: mem lower=");
-        /* ↓↓↓ 在这一行后面写你的代码 ↓↓↓ */
-
-        /* ↑↑↑ 写到这里 ↑↑↑ */
+        print_dec(mb->mem_lower);
+        print("KB, upper=");
+        print_dec(mb->mem_upper / 1024);
+        print("MB");
         print("\n");
     }
 #endif
 
 #if LESSON >= 7
     if (mb->flags & (1u << 6)) {
-        /* TODO(你来写·L07): 遍历 E820 内存映射
-         *   先打印 "S1: memory map (E820):\n"
-         *   每条: "  mmap base=<hex> len=<hex> type=<dec>\n"（最多打 6 条）
-         *   最后: "S1: mmap entries=<总数>\n"
-         * 大坑提示：记录长度在 e->size（不含自身），步进 = e->size + 4！ */
+        print("S1: memory map (E820):\n");
         struct mb_mmap *e = (struct mb_mmap *)(uintptr_t)mb->mmap_addr;
         struct mb_mmap *end = (struct mb_mmap *)(uintptr_t)(mb->mmap_addr + mb->mmap_length);
         int n = 0;
         for (; (uintptr_t)e < (uintptr_t)end;
              e = (struct mb_mmap *)(uintptr_t)((uintptr_t)e + e->size + 4)) {
+            if (n < 6) {                     /* 串口只打前 6 条，防刷屏 */
+                print("  mmap base=");
+                print_hex((uint32_t)e->addr);
+                print(" len=");
+                print_hex((uint32_t)e->len);
+                print(" type=");
+                print_dec(e->type);
+                print("\n");
+            }
             n++;
         }
         print("S1: mmap entries=");

@@ -78,6 +78,8 @@ test: $(B)/boot.iso
 	if [ $(L) -ge 16 ]; then grep -qF "S2: syscall OK"  $(B)/serial.log || { echo "[FAIL] 缺少: S2: syscall OK"; ok=0; }; fi; \
 	if [ $(L) -ge 17 ]; then grep -qF "[user] hello from ring3" $(B)/serial.log || { echo "[FAIL] 缺少: [user] hello from ring3"; ok=0; }; fi; \
 	if [ $(L) -ge 18 ]; then grep -qF "kbd: a"          $(B)/serial.log || { echo "[FAIL] 缺少: kbd: a（注键没收到？）"; ok=0; }; fi; \
+	if [ $(L) -ge 19 ]; then grep -qF "[capstone] writefile ret=13" $(B)/serial.log || { echo "[FAIL] 缺少: capstone writefile"; ok=0; }; \
+	                     grep -qF "cap.txt(13B)"        $(B)/serial.log || { echo "[FAIL] 缺少: cap.txt(13B)（ls 里没有！）"; ok=0; }; fi; \
 	[ $$ok = 1 ] && echo "[PASS] L$(L)" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }
 
 run: $(B)/boot.iso

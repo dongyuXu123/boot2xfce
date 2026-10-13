@@ -1,39 +1,41 @@
-; L17 桩 —— ring3 进入蹦床（switch_to 是你 L14 的成果，保留）
-; 本课只写 utask_trampoline：构造 iret 帧一次性降级到 ring3。
-; 验收：用户程序真的跑起来（串口出现 [user] hello ...）。
-; ================================================================
+; ============================================================
+; cpu.asm —— CPU 级原语：GDT 重载 / TSS 装载 / 上下文切换 / ring3 进入
+; ============================================================
 [bits 32]
 
 section .data
 global utask_eip, utask_esp
-utask_eip: dd 0                 ; ring3 代码入口（task_create 填 USER_BASE）
-utask_esp: dd 0                 ; ring3 栈顶（task_create 填 USER_TOP）
+utask_eip: dd 0                 ; ring3 代码入口
+utask_esp: dd 0                 ; ring3 栈顶
 
 section .text
 global gdt_flush, tss_flush, switch_to, utask_trampoline
-extern gp
+extern gp                       ; gdt.c 里的 GDTR
 
-; 你的 L14 成果：gdt_flush
+; void gdt_flush(uint32_t gdtr_ptr)
 gdt_flush:
     mov eax, [esp+4]
     lgdt [eax]
-    mov ax, 0x10
+    mov ax, 0x10                ; 重载数据段
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    jmp 0x08:.flush
+    jmp 0x08:.flush             ; 远跳重载 CS
 .flush:
     ret
 
-; 给定：tss_flush
+; void tss_flush(void)
 tss_flush:
-    mov ax, 0x2B
+    mov ax, 0x2B                ; TSS 描述符选择子（GDT 第 5 项）
     ltr ax
     ret
 
-; 你的 L14 成果：switch_to
+; void switch_to(struct context *old, struct context *new)
+; 经典软件上下文切换（xv6 风格）：只存被调方保存寄存器 + 栈指针，
+; 中断现场自然留在各自任务内核栈上，恢复后各自完成 iret。
+; 压栈顺序 ebx,esi,edi,ebp → 栈上 ebp 最低；struct context 顺序与此一致。
 switch_to:
     mov eax, [esp+4]            ; old
     mov edx, [esp+8]            ; new
@@ -41,22 +43,19 @@ switch_to:
     push esi
     push edi
     push ebp
-    mov [eax], esp
-    mov esp, edx
+    mov [eax], esp              ; 保存当前上下文
+    mov esp, edx                ; 换栈
     pop ebp
     pop edi
     pop esi
     pop ebx
-    ret
+    ret                         ; ret 即跳到 new->eip
 
-; TODO(你来写·L17): 构造 iret 帧降级 ring3
-; 依次 push（栈从高到低的语义顺序）：
-;   用户 ss = 0x23          ← push 最先（最外）
-;   用户 esp = [utask_esp]
-;   eflags = 0x202          ← IF=1，别的位为什么必须清零？
-;   用户 cs = 0x1B          ← RPL=3，和 GDT 里 0x18 的关系？
-;   用户 eip = [utask_eip]  ← push 最后（CPU 先取它）
-; 然后 iretd。
-; 想想：进 ring3 前谁负责把 TSS.esp0 指到本任务内核栈顶？（提示：schedule）
+; ring3 任务首次被调度时经 kctx.eip 到达这里：构造 iret 帧降级到 ring3
 utask_trampoline:
-    iretd                       ; TODO: 替换我
+    push dword 0x23             ; 用户数据段（RPL=3）
+    push dword [utask_esp]
+    push dword 0x202            ; EFLAGS：IF=1
+    push dword 0x1B             ; 用户代码段（RPL=3）
+    push dword [utask_eip]
+    iretd

@@ -1,8 +1,14 @@
-; ================================================================
-; L02 桩 —— 亲手写 COM1 串口驱动
-; 上一课的 BIOS 打印已经就位（保留你的成果），本课把串口两件套
-; 从"给定设施"降级为 TODO：初始化 + 发送。
-; ================================================================
+; ============================================================
+; S0 —— 加电第一步（实模式 16 位）
+;
+; x86 加电/复位后 CPU 从 0xFFFF0 开始执行，BIOS 完成自检后按启动顺序
+; 把第一个可引导设备的第一个扇区（512 字节，末尾必须是 0xAA55）加载到
+; 物理地址 0x7C00，然后跳过去执行 —— 这就是 MBR。
+;
+; 本阶段：证明"我们接管了机器"。输出走两路：
+;   - BIOS int 10h → VGA 文本（人看的）
+;   - 直接写 COM1 端口 0x3F8 → 串口（QEMU 无头测试断言用）
+; ============================================================
 [BITS 16]
 [ORG 0x7C00]
 
@@ -10,11 +16,11 @@ COM1 equ 0x3F8
 
 start:
     cli
-    xor ax, ax
+    xor ax, ax              ; 初始化段寄存器：DS/ES/SS=0
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov sp, 0x7C00
+    mov sp, 0x7C00          ; 栈向下生长，放 MBR 自己下面
     sti
 
     call serial_init
@@ -24,33 +30,55 @@ start:
     lodsb
     or al, al
     jz .hang
-    mov ah, 0x0E
-    mov bx, 0x0007
+    mov ah, 0x0E            ; BIOS TTY 输出（电传模式，到 VGA）
+    mov bx, 0x0007          ; 页0 / 黑底白字
     int 0x10
-    call serial_putc
+    call serial_putc        ; 同一个字符也送 COM1
     jmp .print
 .hang:
     hlt
     jmp .hang
 
-; TODO(你来写·L02): 初始化 COM1 为 115200 8N1、开 FIFO
-; 步骤（对照任务书和 stages/s0-mbr/mbr.asm 的答案）：
-;   1) IER(COM1+1) 写 0          关串口中断
-;   2) LCR(COM1+3) 写 0x80       DLAB=1
-;   3) DLL(COM1) 写 1, DLM 写 0  除数=1 → 115200
-;   4) LCR 写 0x03               8N1，DLAB=0
-;   5) FCR(COM1+2) 写 0xC7       FIFO
-;   6) MCR(COM1+4) 写 0x0B       DTR|RTS|OUT2
+; ---- 初始化 COM1：115200 8N1，FIFO 开 ----
 serial_init:
-    ret                         ; TODO: 替换我
+    mov dx, COM1+1
+    xor al, al              ; 禁用串口中断
+    out dx, al
+    mov dx, COM1+3
+    mov al, 0x80            ; DLAB=1，允许设置波特率
+    out dx, al
+    mov dx, COM1
+    mov al, 0x01            ; 除数低字节=1（115200）
+    out dx, al
+    mov dx, COM1+1
+    xor al, al              ; 除数高字节=0
+    out dx, al
+    mov dx, COM1+3
+    mov al, 0x03            ; 8N1，DLAB=0
+    out dx, al
+    mov dx, COM1+2
+    mov al, 0xC7            ; 开 FIFO、清队列
+    out dx, al
+    mov dx, COM1+4
+    mov al, 0x0B            ; DTR+RTS+OUT2
+    out dx, al
+    ret
 
-; TODO(你来写·L02): 发送 AL 到 COM1（必须保留 AX！主循环还要用它）
-; 步骤：先轮询 LSR(COM1+5) 的 bit5（发送保持寄存器空），
-;       再把 AL 写进数据口 COM1。
+; 入口 AL=字符；保留 AX
 serial_putc:
-    ret                         ; TODO: 替换我
+    push ax
+    mov dx, COM1+5
+.wait:
+    in al, dx
+    test al, 0x20           ; 发送保持寄存器空？
+    jz .wait
+    pop ax
+    mov dx, COM1
+    out dx, al
+    ret
 
 msg: db "S0: power-on OK - BIOS loaded MBR at 0x7C00, real mode alive", 0x0D, 0x0A, 0
 
+; 补零到 510 字节，最后两字节是引导签名
 times 510-($-$$) db 0
 dw 0xAA55

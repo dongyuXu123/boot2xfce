@@ -1,39 +1,44 @@
-/* L16 桩 —— int 0x80 系统调用分发器
+/* syscall.c —— int 0x80 系统调用（API 层）
+ *
  * 约定：eax=调用号，ebx/ecx/edx=参数，eax=返回值。
- *   1 write(fd=1, buf, len)  2 getpid()  3 exit(code)
- *   4 uptime()               5 ls()
- * 桩把 eax 统一置 -1：没有任何标记会被打印，test 必红。 */
+ *   1 write(fd, buf, len)   fd=1 → 串口+VGA
+ *   2 getpid()
+ *   3 exit(code)            本任务标记 DEAD，不再被调度
+ *   4 uptime()              返回 ticks
+ *   5 ls()                  内核侧打印 ramfs 文件表
+ * 用户指针直接用（无分页=同一地址空间）；S3 开分页后这里必须换成
+ * "只翻一层"的拷贝语义，防用户传内核指针。
+ */
 #include "kernel.h"
 
 void syscall_dispatch(struct regs *r) {
     switch (r->eax) {
     case 1: {                                   /* write */
-        /* TODO(你来写·L16):
-         * 1) n = min(r->edx, 255)
-         * 2) memcpy 到内核 kbuf，补 '\0'
-         * 3) print(kbuf)；r->eax = n
-         * （无分页=同一地址空间，用户指针直用；S3 开分页后这里必须换
-         *   "只翻一层"的拷贝语义，防用户传内核指针） */
-        static char kbuf[256];
-        r->eax = (uint32_t)-1;
+        static char kbuf[256];                  /* 单 CPU，静态缓冲够用 */
+        uint32_t n = r->edx;
+        if (n > 255) n = 255;
+        memcpy(kbuf, (void *)(uintptr_t)r->ecx, n);
+        kbuf[n] = 0;
+        print(kbuf);
+        r->eax = n;
         break;
     }
     case 2:                                     /* getpid */
-        /* TODO: r->eax = current->pid */
-        r->eax = (uint32_t)-1;
+        r->eax = current->pid;
         break;
     case 3:                                     /* exit */
-        /* TODO: current->state = T_DEAD（想想为什么这里不能 kfree 自己的栈），
-         * 打印 "S2: [user] exit, pid=<pid>\n"，r->eax=0 */
-        r->eax = (uint32_t)-1;
+        current->state = T_DEAD;
+        print("S2: [user] exit, pid=");
+        print_dec(current->pid);
+        print("\n");
+        r->eax = 0;
         break;
     case 4:                                     /* uptime */
-        /* TODO: r->eax = ticks */
-        r->eax = (uint32_t)-1;
+        r->eax = ticks;
         break;
     case 5:                                     /* ls */
-        /* TODO: ramfs_list(); r->eax = 0 */
-        r->eax = (uint32_t)-1;
+        ramfs_list();
+        r->eax = 0;
         break;
     default:
         r->eax = (uint32_t)-1;

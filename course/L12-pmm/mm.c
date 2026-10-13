@@ -1,8 +1,9 @@
-/* L12 桩 —— 物理页帧位图 PMM（堆是给定成果，L13 才轮到你写它）
- * 1 位 = 1 页(4KiB)：0=空闲 1=已占。输入是 GRUB 的 E820 mmap。
- * 验收：连发两页必须不同且 4K 对齐，释放后重发必须拿回同一页。 */
+/* mm.c —— 物理页帧位图（PMM，来自 Multiboot 内存映射）
+ *        + 固定区堆 kmalloc/kfree（首次适应 + 后向合并）
+ * S2 只做这两个；分页/虚存/按需调页留给 S3。 */
 #include "kernel.h"
 
+/* ---------- 物理页帧管理：1 位 = 1 页(4KiB)，0=空闲 1=已占 ---------- */
 #define PMM_LIMIT   0x20000000u            /* 管到 512MiB，够教学用 */
 #define PMM_FRAMES  (PMM_LIMIT / 4096)
 static uint8_t  pmm_bm[PMM_FRAMES / 8];    /* 16KiB，在内核 .bss 里 */
@@ -20,32 +21,55 @@ static void reserve_range(uint32_t base, uint32_t end) {
 }
 
 void pmm_init(struct mb_info *mb) {
-    /* TODO(你来写·L12):
-     * 1) 位图清零、计数清零
-     * 2) 遍历 mmap（信息结构 flags bit6；type==1 才可用）
-     *    base 截到 >=1MiB、按 4K 向上取整；lim 截到 PMM_LIMIT
-     *    逐页数出 pmm_total
-     * 3) 保留三块固定区：内核镜像[1M,kernel_end]、堆[HEAP_START,HEAP_END)、
-     *    用户区[USER_BASE, USER_BASE+1M)
-     * 大坑：mmap 记录步进 = e->size + 4（L07 你应该已经疼过了） */
-    (void)mb;
+    memset(pmm_bm, 0, sizeof(pmm_bm));
+    pmm_total = 0;
+
+    if (mb->flags & (1u << 6)) {       /* GRUB 给了 E820 映射（PC 上通常都有） */
+        struct mb_mmap *e   = (struct mb_mmap *)(uintptr_t)mb->mmap_addr;
+        struct mb_mmap *end = (struct mb_mmap *)(uintptr_t)(mb->mmap_addr + mb->mmap_length);
+        for (; (uintptr_t)e < (uintptr_t)end;
+             e = (struct mb_mmap *)(uintptr_t)((uintptr_t)e + e->size + 4)) {
+            if (e->type != 1) continue;
+            uint32_t base = (uint32_t)e->addr;
+            uint32_t lim  = (uint32_t)(e->addr + e->len);
+            if (lim > PMM_LIMIT) lim = PMM_LIMIT;
+            if (base < 0x100000u) base = 0x100000u;    /* 低 1MiB 给 BIOS/实模式 */
+            base = (base + 4095) & ~4095u;
+            for (uint32_t a = base; a + 4096 <= lim; a += 4096)
+                pmm_total++;
+        }
+    } else if (mb->flags & 1u) {       /* 兜底：只有 mem_upper，按连续可用算 */
+        uint32_t lim = 0x100000u + mb->mem_upper * 1024u;
+        if (lim > PMM_LIMIT) lim = PMM_LIMIT;
+        pmm_total = (lim - 0x100000u) / 4096u;
+    } else {
+        print("S2: pmm: no memory info from grub!\n");
+        return;
+    }
+
+    /* 固定保留区：低 1MiB（BIOS/实模式/IVT——不保留的话 alloc 从帧 0
+     * 扫起会把 0x0 当可分配页，此 bug 由课程的 alloc/free 断言揪出）
+     * + 内核映像 / 堆 / 用户区（代码+栈） */
+    reserve_range(0, 0x100000u);
+    reserve_range(0x100000u, (uint32_t)(uintptr_t)kernel_end);
+    reserve_range(HEAP_START, HEAP_END);
+    reserve_range(USER_BASE, USER_BASE + 0x100000u);
 }
 
-uint32_t pmm_total_frames(void) {
-    return 0;                    /* TODO: 替换我 */
-}
+uint32_t pmm_total_frames(void) { return pmm_total; }
 
 uint32_t pmm_alloc_frame(void) {
-    /* TODO(你来写·L12): 从 pmm_hint 起找第一个 0 位，置 1 返回页地址；没了返回 0 */
-    return 0;
+    for (uint32_t f = pmm_hint; f < pmm_total; f++)
+        if (!bm_get(f)) { bm_set(f); pmm_hint = f + 1; return f * 4096u; }
+    return 0;                                      /* 没了 */
 }
 
 void pmm_free_frame(uint32_t addr) {
-    /* TODO(你来写·L12): 清位，并把 pmm_hint 拉回来加速复用 */
-    (void)addr;
+    uint32_t f = addr / 4096;
+    if (f < pmm_total) { pmm_bm[f >> 3] &= (uint8_t)~(1u << (f & 7)); pmm_hint = f; }
 }
 
-/* ---------- 堆（给定成果：首次适应 + 分裂 + 后向合并，L13 课重写） ---------- */
+/* ---------- 堆：块头 12B，首次适应，kfree 向后合并 ---------- */
 struct hb {
     uint32_t    size;      /* 不含块头 */
     uint32_t    used;
@@ -61,10 +85,10 @@ void heap_init(void) {
 }
 
 void *kmalloc(uint32_t n) {
-    n = (n + 3) & ~3u;
+    n = (n + 3) & ~3u;                 /* 4 字节对齐 */
     for (struct hb *b = heap_head; b; b = b->next) {
         if (b->used || b->size < n) continue;
-        if (b->size >= n + sizeof(struct hb) + 8) {
+        if (b->size >= n + sizeof(struct hb) + 8) {   /* 够大就切一块 */
             struct hb *r = (struct hb *)((uint8_t *)b + sizeof(struct hb) + n);
             r->size = b->size - n - sizeof(struct hb);
             r->used = 0;
@@ -82,7 +106,7 @@ void kfree(void *p) {
     if (!p) return;
     struct hb *b = (struct hb *)((uint8_t *)p - sizeof(struct hb));
     b->used = 0;
-    for (struct hb *c = b; c->next; ) {
+    for (struct hb *c = b; c->next; ) {            /* 向后合并空闲邻居 */
         if (c->used) { c = c->next; continue; }
         struct hb *n = c->next;
         if (n->used) { c = n; continue; }
