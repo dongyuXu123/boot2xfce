@@ -127,6 +127,21 @@ task_t *task_clone(task_t *parent, struct regs *r) {
     return t;
 }
 
+/* spawn：内核侧创建用户任务并装载程序（ESC 新 shell / SYS 22 应用） */
+int task_spawn(const char *path, uint32_t ppid, const char *title) {
+    task_t *t = task_create(0, 1);
+    if (!t) return -1;
+    t->ppid = ppid;
+    if (task_exec_image(t, path) != 0) {
+        kfree(t->kstack);
+        memset(t, 0, sizeof(*t));
+        return -1;
+    }
+    extern int gfx_spawn_window(uint32_t pid, const char *title);
+    if (gfx_active()) gfx_spawn_window((uint32_t)t->pid, title);
+    return (int)t->pid;
+}
+
 /* 时间片轮转：从上次调度的下一个槽位开始找 READY */
 void schedule(void) {
     static int last = -1;
@@ -205,6 +220,7 @@ void task_b(void) {
 
 void kbd_task(void) {                   /* 有键回显（无头测试时静默） */
     for (;;) {
+        { extern int gfx_active(void); if (gfx_active()) { task_yield(); continue; } }
         int c;
         while ((c = kbd_pop()) >= 0) {
             if (c >= 32 && c < 127) {

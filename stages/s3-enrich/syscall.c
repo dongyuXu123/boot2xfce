@@ -36,10 +36,18 @@ void syscall_dispatch(struct regs *r) {
     case 4:                                     /* uptime */
         r->eax = ticks;
         break;
-    case 5:                                     /* ls */
-        ramfs_list();
+    case 5: {                                   /* ls([path]) */
+        static char kp[64];
+        const char *pp = ".";
+        if (r->ebx) {
+            for (int i = 0; i < 63; i++) { kp[i] = ((char *)(uintptr_t)r->ebx)[i]; if (!kp[i]) break; }
+            kp[63] = 0;
+            pp = kp;
+        }
+        ramfs_list(pp);
         r->eax = 0;
         break;
+    }
     case 7: {                                   /* fork()：父得 pid，子得 0 */
         task_t *ch = task_clone(current, r);
         r->eax = ch ? ch->pid : (uint32_t)-1;
@@ -109,6 +117,38 @@ void syscall_dispatch(struct regs *r) {
     case 15:                                    /* lseek(fd, off, whence) */
         r->eax = (uint32_t)fd_lseek(current, (int)r->ebx, (int32_t)r->ecx, (int)r->edx);
         break;
+    case 18: {                                  /* mkdir(path) */
+        static char kn[64];
+        for (int i = 0; i < 63; i++) { kn[i] = ((char *)(uintptr_t)r->ebx)[i]; if (!kn[i]) break; }
+        kn[63] = 0;
+        r->eax = (uint32_t)ramfs_mkdir(kn);
+        break;
+    }
+    case 19: {                                  /* rm(path) */
+        static char kn2[64];
+        for (int i = 0; i < 63; i++) { kn2[i] = ((char *)(uintptr_t)r->ebx)[i]; if (!kn2[i]) break; }
+        kn2[63] = 0;
+        r->eax = (uint32_t)ramfs_rm(kn2);
+        break;
+    }
+    case 20: {                                  /* chdir(path) */
+        static char kn3[64];
+        for (int i = 0; i < 63; i++) { kn3[i] = ((char *)(uintptr_t)r->ebx)[i]; if (!kn3[i]) break; }
+        kn3[63] = 0;
+        r->eax = (uint32_t)ramfs_chdir(kn3);
+        break;
+    }
+    case 21: {                                  /* getcwd(buf, max) */
+        static char kc[128];
+        int n2 = ramfs_getcwd(kc, 128);
+        uint32_t ub = r->ebx, lim = r->edx;
+        if (!uptr_ok(ub, lim) || lim > 127) { r->eax = (uint32_t)-1; break; }
+        if ((uint32_t)n2 > lim) n2 = (int)lim;
+        memcpy((void *)(uintptr_t)ub, kc, (uint32_t)n2);
+        ((char *)(uintptr_t)ub)[n2] = 0;
+        r->eax = (uint32_t)n2;
+        break;
+    }
     default:
         r->eax = (uint32_t)-1;
         break;

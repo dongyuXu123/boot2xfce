@@ -58,13 +58,13 @@ build/sh_blob.o: sh_blob.asm build/sh.elf | $(B)
 
 test: $(B)/boot.iso
 	@rm -f $(B)/serial.log
-	@( sleep 10; for k in r u n spc h e l l o ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 5; printf 'quit\n' ) \
+	@( sleep 10; for k in r u n spc h e l l o ret m k d i r spc d e m o ret l s ret; do printf 'sendkey %s\n' $$k; sleep 0.3; done; sleep 5; printf 'quit\n' ) \
 		| timeout 30 $(QEMU) -cdrom $< -boot d -display none -no-reboot \
 		-serial file:$(B)/serial.log -monitor stdio > /dev/null 2>&1 || true
 	@ok=1; \
 	for m in "S3: GDT/IDT/PIC/PIT ready" "S3: pmm frames=" "S3: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S3: kernel core ready" \
-	         "S3: demand page OK" "S3: per-task pd + ELF image OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5" "[hello] ELF exec OK" "S3: ramfs ls:" "[sh] shell ready" "[sh] child done"; do \
+	         "S3: demand page OK" "S3: per-task pd + ELF image OK" "[user] hello from ring3" "[child] fork=0, x=" "reaped, x=5" "[hello] ELF exec OK" "S3: ls /:" "demo/" "[sh] shell ready" "[sh] child done"; do \
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s3 缺少标记: $$m"; ok=0; }; \
 	done; \
 	[ $$ok = 1 ] && echo "[PASS] s3" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }

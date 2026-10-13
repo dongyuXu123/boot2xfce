@@ -35,7 +35,7 @@ void kmain(uint32_t magic, struct mb_info *mb) {
             print("S3: demand BROKEN\n");
     }
 
-    /* ---- 文件管理冒烟：写 hello.txt 再读回 ---- */
+    /* ---- 文件管理冒烟：树形目录 + mkdir/chdir/rm ---- */
     ramfs_init();
     const char *msg = "hello,ramfs!\n";
     ramfs_write("hello.txt", msg, 13);
@@ -47,6 +47,15 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     else {
         print("S3: ramfs BROKEN\n");
         for (;;) hlt();
+    }
+    {
+        int ok = ramfs_mkdir("/home") == 0
+              && ramfs_mkdir("/home/user") == 0
+              && ramfs_write("/home/user/t.txt", "x", 1) == 1
+              && ramfs_chdir("/home/user") == 0
+              && ramfs_rm("t.txt") == 0
+              && ramfs_chdir("/") == 0;
+        print(ok ? "S3: fs tree OK\n" : "S3: fs tree BROKEN\n");
     }
 
     /* ---- 程序入库：/bin/init（自启）与 /bin/hello（execve 目标） ---- */

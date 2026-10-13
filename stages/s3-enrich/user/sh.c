@@ -17,7 +17,29 @@ void user_main(void) {
         if (line[n - 1] == '\n') line[n - 1] = 0; else line[n] = 0;
         if (line[0] == 0) continue;
         if (streq(line, "help")) {
-            uprint("commands: run hello | echo <s> | help\n");
+            uprint("cmds: ls [p] cd p mkdir p rm p pwd cat f run hello echo s gfx help\n");
+        } else if (streq(line, "pwd")) {
+            char b[128];
+            sys(21, (intptr_t)b, 127, 0);
+            uprint(b); uprint("\n");
+        } else if (line[0]=='l' && line[1]=='s' && (line[2]==0 || line[2]==' ')) {
+            sys(5, line[2] ? (intptr_t)line + 3 : 0, 0, 0);
+        } else if (line[0]=='c' && line[1]=='d' && line[2]==' ') {
+            if (sys(20, (intptr_t)line + 3, 0, 0) < 0) uprint("cd: bad dir\n");
+        } else if (line[0]=='m' && line[1]=='k' && line[2]=='d' && line[3]=='i' && line[4]=='r' && line[5]==' ') {
+            if (sys(18, (intptr_t)line + 6, 0, 0) < 0) uprint("mkdir: failed\n");
+        } else if (line[0]=='r' && line[1]=='m' && line[2]==' ') {
+            if (sys(19, (intptr_t)line + 3, 0, 0) < 0) uprint("rm: failed\n");
+        } else if (line[0]=='c' && line[1]=='a' && line[2]=='t' && line[3]==' ') {
+            int fd = sys(11, (intptr_t)line + 4, 0, 0);
+            if (fd < 0) { uprint("cat: no file\n"); }
+            else {
+                char cb[256];
+                int cn = sys(12, fd, (intptr_t)cb, 255);
+                if (cn > 0) sys(1, 1, (intptr_t)cb, cn);
+                uprint("\n");
+                sys(14, fd, 0, 0);
+            }
         } else if (streq(line, "run hello")) {
             long pid = sys(7, 0, 0, 0);          /* fork */
             if (pid == 0) {

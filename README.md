@@ -57,4 +57,7 @@ make -C stages/s2-kernel-core run   # 想亲眼看：带图形窗口启动 S2
   - 进程：xv6 式内核栈上下文切换 + 100Hz 时间片轮转 + ring3 用户任务
   - 文件：内存盘 ramfs（写/读/列目录）
   - API：int 0x80（write/getpid/exit/uptime/ls）
-- ⏳ S3/S4：规划见 [ROADMAP.md](ROADMAP.md)
+- ✅ S3：分页/每进程地址空间/COW fork/ELF+execve/VFS+fd/TTY+shell（全绿）
+- ✅ S4 Track B：自研窗口系统桌面（鼠标点击聚焦、多 shell 窗口、calc/clock/notepad 应用），像素级验收全绿（docs/s4-desktop.png）
+- ⏳ S4 Track A：真栈 Xfce（scripts/trackA-README.md 方案就绪）
+- ⏳ S3/S4 切课（L20+）与讲义

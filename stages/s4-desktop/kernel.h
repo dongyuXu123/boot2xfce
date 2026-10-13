@@ -130,9 +130,13 @@ void page_fault_handler(uint32_t err, uint32_t va);
 
 /* ---------- ramfs.c ---------- */
 void ramfs_init(void);
-int  ramfs_write(const char *name, const void *buf, uint32_t len);
-int  ramfs_read(const char *name, void *buf, uint32_t max);  /* 返回实际长度 */
-void ramfs_list(void);                  /* 打印文件表 */
+int  ramfs_write(const char *path, const void *buf, uint32_t len);
+int  ramfs_read(const char *path, void *buf, uint32_t max);
+int  ramfs_mkdir(const char *path);
+int  ramfs_rm(const char *path);
+int  ramfs_chdir(const char *path);
+int  ramfs_getcwd(char *buf, int max);
+void ramfs_list(const char *path);      /* 打印目录内容 */
 struct vnode;
 struct vnode *ramfs_lookup_vnode(const char *name);
 
@@ -163,8 +167,20 @@ void fb_text(uint32_t x, uint32_t y, const char *s, uint32_t rgb);
 void gfx_start(void);
 void gfx_task(void);
 int  gfx_active(void);
+int  gfx_spawn_window(uint32_t pid, const char *title);
+void gfx_on_exit(uint32_t pid);
+int  tty_read_window(uint32_t pid, char *out, int max);
+void tty_write_window(uint32_t pid, const char *s);
 extern uint32_t fb_addr, fb_pitch, fb_w, fb_h;
 extern struct mb_info *g_mb;
+
+/* ---------- mouse.c（S4 PS/2 鼠标） ---------- */
+void mouse_init(void);
+void mouse_intr(void);
+int  mouse_pop(uint8_t *btn, int16_t *dx, int16_t *dy);
+
+/* ---------- rtc.c（S4 实时钟） ---------- */
+uint32_t rtc_time(void);
 
 /* ---------- tty.c（S3-M6 行规程） ---------- */
 void tty_init(void);
@@ -204,6 +220,7 @@ task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 uint32_t task_wait_scan(uint32_t pid);                /* 收尸一个死子，返回其 pid */
 int  task_exec_image(task_t *t, const char *name);    /* ELF 换像（M4） */
+int  task_spawn(const char *path, uint32_t ppid, const char *title);
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));
 void task_yield(void);                  /* 内核任务主动让出 CPU */

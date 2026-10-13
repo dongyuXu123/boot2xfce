@@ -27,12 +27,14 @@ def main():
         else:
             print(f'[FAIL] {name} @({x},{y}) got={got} want={rgb}')
             ok = False
-    check('desktop bg',   600, 200, (0x1E, 0x3A, 0x5F))
-    check('taskbar',      320, 470, (0x14, 0x20, 0x2E))
-    check('start btn',     30, 464, (0x4C, 0xD1, 0x37))
-    check('focus border', 120, 300, (0xF9, 0xCA, 0x24))   # 键盘窗（最后添加=焦点）
-    check('win bg',       150, 120, (0xEE, 0xEE, 0xEE))
-    check('clock decor',  480, 126, (0xEE, 0x5A, 0x24))
+    check('desktop bg',   600, 440, (0x1E, 0x3A, 0x5F))
+    check('taskbar',      320, 475, (0x14, 0x20, 0x2E))
+    check('start btn',      8, 464, (0x4C, 0xD1, 0x37))
+    check('win0 bg',      150, 120, (0xF4, 0xF4, 0xF4))
+    check('win1 bg',      400, 120, (0xF4, 0xF4, 0xF4))
+    check('win2 bg',      560, 180, (0xF4, 0xF4, 0xF4))
+    check('win1 titlebar', 300,  56, (0x57, 0x60, 0x6F))
+    check('win2 titlebar', 560,  56, (0x2E, 0x86, 0xDE))
     print('[PASS] screen' if ok else '[FAIL] screen')
     sys.exit(0 if ok else 1)
 main()

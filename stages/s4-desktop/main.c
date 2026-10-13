@@ -17,6 +17,7 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     pic_init();
     pit_init(100);
     tty_init();
+    mouse_init();
     print("S4: GDT/IDT/PIC/PIT ready\n");
 
     pmm_init(mb);
@@ -46,9 +47,12 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     buf[n > 0 ? n : 0] = 0;
     if (n == 13 && buf[0] == 'h' && buf[12] == '\n')
         print("S4: ramfs read-back OK\n");
-    else {
-        print("S3: ramfs BROKEN\n");
-        for (;;) hlt();
+    {
+        int ok = ramfs_mkdir("/home") == 0 && ramfs_mkdir("/home/user") == 0
+              && ramfs_write("/home/user/t.txt", "x", 1) == 1
+              && ramfs_chdir("/home/user") == 0 && ramfs_rm("t.txt") == 0
+              && ramfs_chdir("/") == 0;
+        print(ok ? "S4: fs tree OK\n" : "S4: fs tree BROKEN\n");
     }
 
     /* ---- 程序入库：/bin/init（自启）与 /bin/hello（execve 目标） ---- */
@@ -57,6 +61,9 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     ramfs_write("/bin/init",  init_blob,  init_blob_end - init_blob);
     ramfs_write("/bin/hello", hello_blob, hello_blob_end - hello_blob);
     ramfs_write("/bin/sh",    sh_blob,    sh_blob_end - sh_blob);
+    ramfs_write("/bin/calc",  calc_blob,  calc_blob_end - calc_blob);
+    ramfs_write("/bin/clock", clock_blob, clock_blob_end - clock_blob);
+    ramfs_write("/bin/notepad", notepad_blob, notepad_blob_end - notepad_blob);
 
     /* ---- 进程：轮转任务 + 键盘 + ELF 方式启动的 init ---- */
     tasks_init();

@@ -130,11 +130,15 @@ void page_fault_handler(uint32_t err, uint32_t va);
 
 /* ---------- ramfs.c ---------- */
 void ramfs_init(void);
-int  ramfs_write(const char *name, const void *buf, uint32_t len);
-int  ramfs_read(const char *name, void *buf, uint32_t max);  /* 返回实际长度 */
-void ramfs_list(void);                  /* 打印文件表 */
+int  ramfs_write(const char *path, const void *buf, uint32_t len);
+int  ramfs_read(const char *path, void *buf, uint32_t max);
+int  ramfs_mkdir(const char *path);
+int  ramfs_rm(const char *path);
+int  ramfs_chdir(const char *path);
+int  ramfs_getcwd(char *buf, int max);
+void ramfs_list(const char *path);      /* 打印目录内容（0=当前目录） */
 struct vnode;
-struct vnode *ramfs_lookup_vnode(const char *name);
+struct vnode *ramfs_lookup_vnode(const char *path);
 
 /* ---------- file.c（S3-M5 VFS + fd 表） ---------- */
 struct task;                                 /* 前置声明（task_t 在下文 typedef） */

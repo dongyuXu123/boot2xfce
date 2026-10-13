@@ -20,7 +20,7 @@ void pic_init(void) {
     outb(PIC1_DAT, 0x01);               /* ICW4: 8086 模式 */
     outb(PIC2_DAT, 0x01);
     outb(PIC1_DAT, 0xF8);               /* 屏蔽字：只放行 IRQ0(时钟) IRQ1(键盘) IRQ2(级联) */
-    outb(PIC2_DAT, 0xFF);               /* 从片全屏蔽 */
+    outb(PIC2_DAT, 0xEF);               /* 从片：只放行 IRQ12（鼠标），0xEF = ~0x10 */
 }
 
 /* ---------- 8253/8254 PIT：通道 0 方波，驱动调度 ---------- */
@@ -94,6 +94,10 @@ void isr_dispatch(struct regs *r) {
         kbd_intr();
         extern void tty_poll(void);
         tty_poll();
+    } else if (r->int_no == 44) {       /* IRQ12 鼠标 */
+        outb(0xA0, 0x20);
+        outb(0x20, 0x20);
+        mouse_intr();
     } else if (r->int_no == 0x80) {
         syscall_dispatch(r);
     } else {

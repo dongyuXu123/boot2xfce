@@ -42,6 +42,13 @@ static int tty_read_impl(struct vnode *v, void *buf, uint32_t len, uint32_t off)
 }
 static int tty_write_impl(struct vnode *v, const void *buf, uint32_t len, uint32_t off) {
     (void)v; (void)off;
+    if (gfx_active()) {
+        char tmp[256];
+        uint32_t n2 = len < 255 ? len : 255;
+        memcpy(tmp, buf, n2); tmp[n2] = 0;
+        tty_write_window(current->pid, tmp);
+        return (int)n2;
+    }
     const char *s = buf;
     for (uint32_t i = 0; i < len; i++) { char b[2] = { s[i], 0 }; print(b); }
     return (int)len;
