@@ -24,6 +24,8 @@ typedef uint32_t           uintptr_t;
 
 #define NULL ((void *)0)
 
+struct regs;                               /* 前置声明：task_clone 的参数用 */
+
 /* ---------- Multiboot 信息结构（只用 bit0/bit6，与 S1 相同） ---------- */
 struct mb_info {
     uint32_t flags;
@@ -116,6 +118,7 @@ void page_unmap(uint32_t *pd, uint32_t va);
 uint32_t page_va2pa(uint32_t *pd, uint32_t va);
 uint32_t *current_pd(void);
 uint32_t *page_kernel_pd(void);
+void page_copy_space(uint32_t *dst, uint32_t *src);
 void page_fault_handler(uint32_t err, uint32_t va);
 extern uint32_t *active_pd;              /* 正在用的页目录物理地址 */
 
@@ -154,6 +157,7 @@ typedef struct task {
 extern task_t *current;
 void tasks_init(void);
 task_t *task_create(void (*entry)(void), int is_user);
+task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));
 void task_yield(void);                  /* 内核任务主动让出 CPU */

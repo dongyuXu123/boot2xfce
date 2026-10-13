@@ -16,7 +16,8 @@ static task_t boot_task;                /* kmain 所在的"第 0 任务" */
 task_t *current = &boot_task;
 static uint32_t next_pid = 1;
 
-extern void utask_trampoline(void);     /* cpu.asm */
+extern void utask_trampoline(void);         /* cpu.asm */
+extern void utask_trampoline_forked(void);  /* cpu.asm：fork 任务入场 */
 
 /* 内核任务蹦床：入口函数跑完 → 标记 DEAD → 永久休眠（栈留在那儿，S3 收尸） */
 static void ktask_trampoline(void) {
@@ -83,6 +84,49 @@ task_t *task_create(void (*entry)(void), int is_user) {
     return NULL;
 }
 
+/* fork：复制父的用户地址空间（COW）与 ring3 现场，子返回 0、父返回 pid */
+task_t *task_clone(task_t *parent, struct regs *r) {
+    task_t *t = 0;
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state == T_EMPTY) { t = &tasks[i]; break; }
+    }
+    if (!t) return 0;
+    memset(t, 0, sizeof(*t));
+    t->pid        = next_pid++;
+    t->ppid       = parent->pid;
+    t->state      = T_READY;
+    t->is_user    = 1;
+    t->kstack     = kmalloc(4096);
+    if (!t->kstack) return 0;
+    t->kstack_top = (uint32_t)(uintptr_t)t->kstack + 4096;
+
+    /* 内核栈布局（自顶向下）：context | iret帧 | 段+寄存器影像 */
+    struct context *ctx = (struct context *)(uintptr_t)
+                          (t->kstack_top - sizeof(struct context));
+    uint32_t *iret = (uint32_t *)(uintptr_t)((uint8_t *)ctx - 20);
+    uint32_t *regs = (uint32_t *)(uintptr_t)((uint8_t *)iret - 48);
+
+    regs[0] = 0x23; regs[1] = 0x23; regs[2] = 0x23; regs[3] = 0x23; /* gs fs es ds */
+    regs[4] = r->edi; regs[5] = r->esi; regs[6] = r->ebp; regs[7] = 0;
+    regs[8] = r->ebx; regs[9] = r->edx; regs[10] = r->ecx;
+    regs[11] = 0;                            /* eax=0：子进程 fork() 返回 0 */
+    iret[0] = r->eip;                        /* 从 int 0x80 的下一条用户指令继续 */
+    iret[1] = r->cs;
+    iret[2] = r->eflags;
+    iret[3] = r->esp;
+    iret[4] = r->ss;
+
+    ctx->eip = (uint32_t)(uintptr_t)utask_trampoline_forked;
+    ctx->ebx = (uint32_t)(uintptr_t)regs;
+    t->kesp  = (uint32_t)(uintptr_t)ctx;
+    t->ueip  = r->eip;
+    t->uesp  = r->esp;
+
+    t->pd = page_dir_create();
+    page_copy_space(t->pd, parent->pd);
+    return t;
+}
+
 /* 时间片轮转：从上次调度的下一个槽位开始找 READY */
 void schedule(void) {
     static int last = -1;
@@ -101,6 +145,20 @@ void schedule(void) {
     uint32_t *npd = next->pd ? next->pd : page_kernel_pd();
     if (npd != active_pd) load_cr3((uint32_t)npd);
     switch_to(&prev->kesp, next->kesp);
+}
+
+/* wait 的扫描半边：找到一个属于 pid 的死子并回收（栈/页目录/槽位） */
+task_t *task_wait_scan(uint32_t pid) {
+    for (int i = 0; i < MAX_TASKS; i++) {
+        task_t *t = &tasks[i];
+        if (t->state == T_DEAD && t->ppid == pid) {
+            if (t->kstack) kfree(t->kstack);
+            if (t->pd) page_dir_destroy(t->pd);
+            memset(t, 0, sizeof(*t));            /* 槽位回 T_EMPTY */
+            return t;                            /* 注意：pid 已被清零，调用方先存 */
+        }
+    }
+    return 0;
 }
 
 void sched_loop(void) {                 /* 主 CPU 变成调度器，永不再返回 */

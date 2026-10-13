@@ -9,7 +9,7 @@ utask_eip: dd 0                 ; ring3 代码入口
 utask_esp: dd 0                 ; ring3 栈顶
 
 section .text
-global gdt_flush, tss_flush, switch_to, utask_trampoline
+global gdt_flush, tss_flush, switch_to, utask_trampoline, utask_trampoline_forked
 extern gp                       ; gdt.c 里的 GDTR
 
 ; void gdt_flush(uint32_t gdtr_ptr)
@@ -58,3 +58,16 @@ switch_to:
 utask_trampoline:
     mov esp, ebx                ; esp ← 本任务预制 iret 帧
     iretd                       ; 一发降级 ring3
+
+; fork 出的任务走这里：ebx 指向预制好的"段+通用寄存器影像+iret 帧"，
+; 先恢复段与通用寄存器（eax=0 → 子进程 fork() 返回 0），再 iretd。
+; 影像布局（低→高）：gs fs es ds | edi esi ebp (esp占位) ebx edx ecx eax | iret帧
+utask_trampoline_forked:
+    mov esp, ebx
+    pop gs
+    pop fs
+    pop es
+    pop ds
+    popa
+    add esp, 4                  ; 跳过 popa 跳过的 esp 占位槽
+    iretd

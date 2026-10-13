@@ -19,7 +19,14 @@
 #define PD_INDEX(va) (((va) >> 22) & 0x3FF)
 #define PT_INDEX(va) (((va) >> 12) & 0x3FF)
 
-uint32_t *active_pd = 0;        /* 正在用的页目录（load_cr3 顺手记录） */
+uint32_t *active_pd = 0;
+
+/* ---------- 物理帧引用计数（COW 共享页的生命线） ---------- */
+#define FRAME_MAX 32768                /* 128MiB/4KiB（QEMU 全部物理内存）*/
+static uint8_t frame_ref[FRAME_MAX];     /* 32KiB，.bss 清零即全 0 */
+static uint32_t ref_get(uint32_t pa) { return frame_ref[pa / 4096]; }
+static void ref_inc(uint32_t pa)     { frame_ref[pa / 4096]++; }
+static uint32_t ref_dec(uint32_t pa) { return --frame_ref[pa / 4096]; }        /* 正在用的页目录（load_cr3 顺手记录） */
 
 static uint32_t *boot_pd;       /* 内核启动页目录（所有任务共用其内核部分） */
 
@@ -36,16 +43,47 @@ uint32_t *page_dir_create(void) {
 }
 
 void page_dir_destroy(uint32_t *pd) {
-    /* 释放用户区页表与用户页（内核区共享，不动）。M2/M3 接管调用。 */
+    /* 释放用户区页表与用户页。共享帧（COW/代码）只减引用，归零才回收。 */
     for (uint32_t i = PD_INDEX(USER_BASE); i < 1024; i++) {
         if (!(pd[i] & PG_P)) continue;
         uint32_t *pt = (uint32_t *)(pd[i] & ~0xFFF);
         for (uint32_t j = 0; j < 1024; j++)
-            if (pt[j] & PG_P)
-                pmm_free_frame(pt[j] & ~0xFFF);
+            if (pt[j] & PG_P) {
+                uint32_t pa = pt[j] & ~0xFFF;
+                if (ref_dec(pa) == 0) pmm_free_frame(pa);
+            }
         pmm_free_frame(pd[i] & ~0xFFF);
     }
     pmm_free_frame((uint32_t)(uintptr_t)pd);
+}
+
+/* fork 的地址空间复制：父的可写页转 COW 共享，子映射同一物理帧；
+ * 本就只读的页（代码）直接共享。计数同步 +1。 */
+void page_copy_space(uint32_t *dst, uint32_t *src) {
+    for (uint32_t i = PD_INDEX(USER_BASE); i < 1024; i++) {
+        if (!(src[i] & PG_P)) continue;
+        uint32_t *spt = (uint32_t *)(src[i] & ~0xFFF);
+        /* 子的页表也直接共享同一张（项级 COW 时再改）——共享页表必须
+         * 只读，且页目录项不可再被 walk 的 create 路径改写：
+         * 教学简化：给子单独复制页表结构，逐项共享帧 */
+        uint32_t pt_pa = pmm_alloc_frame();
+        memset((void *)pt_pa, 0, 4096);
+        dst[i] = pt_pa | PG_P | PG_RW | PG_US;
+        uint32_t *dpt = (uint32_t *)pt_pa;
+        for (uint32_t j = 0; j < 1024; j++) {
+            if (!(spt[j] & PG_P)) continue;
+            uint32_t pa = spt[j] & ~0xFFF;
+            uint32_t attr = spt[j] & 0xFFF;
+            if (attr & PG_RW) {                 /* 可写 → 转 COW 共享 */
+                spt[j] = pa | (attr & ~PG_RW) | PG_COW;
+                dpt[j] = pa | (attr & ~PG_RW) | PG_COW;
+            } else {                            /* 只读（代码）直接共享 */
+                dpt[j] = spt[j];
+            }
+            ref_inc(pa);
+        }
+    }
+    if (src == active_pd) reload_cr3();         /* 父的 PTE 改了，TLB 要刷 */
 }
 
 /* ---------- 映射 ---------- */
@@ -110,6 +148,24 @@ uint32_t *page_kernel_pd(void) {
 
 /* 缺页：err bit0=present bit1=write bit2=user */
 void page_fault_handler(uint32_t err, uint32_t va) {
+    /* COW 写拷贝：写一个"在场但只读+COW"的用户页 */
+    if ((err & 1) && (err & 2) && va >= USER_BASE && va < USER_BASE + USER_SPAN) {
+        uint32_t *pte = walk(active_pd, va, 0);
+        if (pte && (*pte & PG_P) && (*pte & PG_COW)) {
+            uint32_t pa = *pte & ~0xFFF;
+            if (ref_get(pa) > 1) {              /* 还有人在共享 → 复制一份 */
+                uint32_t npa = pmm_alloc_frame();
+                if (!npa) goto panic;
+                memcpy((void *)npa, (void *)pa, 4096);
+                ref_dec(pa);
+                *pte = npa | ((*pte) & 0x1FF & ~PG_COW) | PG_RW;
+            } else {                            /* 只剩我一个 → 直接转可写 */
+                *pte = (*pte & ~PG_COW) | PG_RW;
+            }
+            reload_cr3();
+            return;
+        }
+    }
     if (!(err & 1) && va >= USER_BASE && va < USER_BASE + USER_SPAN) {
         /* 按需零页：bss/栈的延迟就位（M3 在此之前插 COW 判定） */
         uint32_t pa = pmm_alloc_frame();

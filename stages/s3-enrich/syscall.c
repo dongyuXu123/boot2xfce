@@ -40,6 +40,21 @@ void syscall_dispatch(struct regs *r) {
         ramfs_list();
         r->eax = 0;
         break;
+    case 7: {                                   /* fork()：父得 pid，子得 0 */
+        task_t *ch = task_clone(current, r);
+        r->eax = ch ? ch->pid : (uint32_t)-1;
+        break;
+    }
+    case 8: {                                   /* wait()：收尸一个死子，阻塞 */
+        for (;;) {
+            task_t *z = 0;
+            extern task_t *task_wait_scan(uint32_t pid);
+            z = task_wait_scan(current->pid);
+            if (z) { r->eax = z->pid; break; }
+            schedule();                          /* 还没有就让出 CPU（无阻塞原语的教学实现） */
+        }
+        break;
+    }
     default:
         r->eax = (uint32_t)-1;
         break;
