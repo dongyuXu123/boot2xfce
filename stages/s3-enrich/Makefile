@@ -14,7 +14,8 @@ UCFLAGS  := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
 
 KOBJS := build/boot.o build/cpu.o build/isr.o build/console.o build/gdt.o build/page.o \
          build/idt.o build/irq.o build/mm.o build/task.o build/ramfs.o \
-         build/syscall.o build/main.o build/elf.o build/init_blob.o build/hello_blob.o
+         build/syscall.o build/main.o build/elf.o build/file.o build/tty.o \
+         build/init_blob.o build/hello_blob.o build/sh_blob.o
 
 B := build
 
@@ -47,14 +48,23 @@ build/init_blob.o: init_blob.asm build/init.elf | $(B)
 build/hello_blob.o: hello_blob.asm build/hello.elf | $(B)
 	$(NASM) $(ASFLAGS) $< -o $@
 
+build/sh.elf: user/sh.c user/ulib.h user/user_start.asm | $(B)
+	$(CC) $(UCFLAGS) -c user/sh.c -o $(B)/sh.o
+	$(LD) -m elf_i386 -nostdlib -static -no-pie -Ttext=0x400000 \
+		-N --build-id=none -o $@ $(B)/user_start.o $(B)/sh.o
+
+build/sh_blob.o: sh_blob.asm build/sh.elf | $(B)
+	$(NASM) $(ASFLAGS) $< -o $@
+
 test: $(B)/boot.iso
 	@rm -f $(B)/serial.log
-	@timeout 20 $(QEMU) -cdrom $< -boot d -display none -no-reboot \
-		-serial file:$(B)/serial.log > /dev/null 2>&1 || true
+	@( sleep 10; for k in r u n spc h e l l o ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 5; printf 'quit\n' ) \
+		| timeout 30 $(QEMU) -cdrom $< -boot d -display none -no-reboot \
+		-serial file:$(B)/serial.log -monitor stdio > /dev/null 2>&1 || true
 	@ok=1; \
 	for m in "S3: GDT/IDT/PIC/PIT ready" "S3: pmm frames=" "S3: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S3: kernel core ready" \
-	         "S3: demand page OK" "S3: per-task pd + ELF image OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5" "[hello] ELF exec OK" "S3: ramfs ls:"; do \
+	         "S3: demand page OK" "S3: per-task pd + ELF image OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5" "[hello] ELF exec OK" "S3: ramfs ls:" "[sh] shell ready" "[sh] child done"; do \
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s3 缺少标记: $$m"; ok=0; }; \
 	done; \
 	[ $$ok = 1 ] && echo "[PASS] s3" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }

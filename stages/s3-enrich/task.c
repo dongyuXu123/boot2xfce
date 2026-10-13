@@ -144,6 +144,8 @@ void schedule(void) {
     /* S3-M2：地址空间随任务切换——换任务必换 CR3（内核任务共享 boot_pd） */
     uint32_t *npd = next->pd ? next->pd : page_kernel_pd();
     if (npd != active_pd) load_cr3((uint32_t)npd);
+    {
+    }
     switch_to(&prev->kesp, next->kesp);
 }
 

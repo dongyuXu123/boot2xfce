@@ -92,6 +92,8 @@ void isr_dispatch(struct regs *r) {
     } else if (r->int_no == 33) {       /* IRQ1 键盘 */
         outb(0x20, 0x20);
         kbd_intr();
+        extern void tty_poll(void);
+        tty_poll();
     } else if (r->int_no == 0x80) {
         syscall_dispatch(r);
     } else {

@@ -29,8 +29,10 @@ void user_main(void) {
         uprint(" reaped, x=");
         uprint_dec(x);
         uprint("\n");
-        sys(3, 0, 0, 0);
+        /* 父不退出：exit 是"行尸标记"，任务会在下一次让出后永远消失——
+         * 后面还要 ls 和 execve 交棒 shell，所以这里绝不能调 */
     }
     sys(5, 0, 0, 0);                    /* ls：内核侧打印 ramfs 文件表 */
-    for (;;) ;                          /* DEAD 后不会再被调度，保险空转 */
+    sys(10, (intptr_t)"/bin/sh", 0, 0);  /* 交棒：init 换像成 shell */
+    for (;;) ;                          /* 到不了这里 */
 }

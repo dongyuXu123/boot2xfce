@@ -132,6 +132,30 @@ void ramfs_init(void);
 int  ramfs_write(const char *name, const void *buf, uint32_t len);
 int  ramfs_read(const char *name, void *buf, uint32_t max);  /* 返回实际长度 */
 void ramfs_list(void);                  /* 打印文件表 */
+struct vnode;
+struct vnode *ramfs_lookup_vnode(const char *name);
+
+/* ---------- file.c（S3-M5 VFS + fd 表） ---------- */
+struct task;                                 /* 前置声明（task_t 在下文 typedef） */
+#define FD_MAX 8
+struct vnode;
+struct file_ops {
+    int (*read)(struct vnode *v, void *buf, uint32_t len, uint32_t off);
+    int (*write)(struct vnode *v, const void *buf, uint32_t len, uint32_t off);
+};
+struct vnode { const struct file_ops *ops; void *data; };
+struct file  { struct vnode *vn; uint32_t off; int used; };
+int  fd_open(struct task *t, const char *kname);       /* 内核侧名字 */
+int  fd_read(struct task *t, int fd, void *kbuf, uint32_t n);
+int  fd_write(struct task *t, int fd, const void *kbuf, uint32_t n);
+int  fd_close(struct task *t, int fd);
+int  fd_lseek(struct task *t, int fd, int32_t off, int whence);
+int  uptr_ok(uint32_t va, uint32_t n);            /* 用户指针范围校验 */
+
+/* ---------- tty.c（S3-M6 行规程） ---------- */
+void tty_init(void);
+void tty_feed(char c);
+void tty_poll(void);
 
 /* ---------- task.c ---------- */
 typedef enum { T_EMPTY, T_READY, T_RUNNING, T_DEAD } tstate_t;
@@ -157,6 +181,7 @@ typedef struct task {
     uint32_t    *pd;                    /* S3：本任务页目录（0=共享内核 boot_pd） */
     uint32_t     ppid;                  /* 父 pid（0=内核祖宗） */
     uint32_t     ueip, uesp;            /* ring3 进入点（创建/execve 时定） */
+    struct file  fds[FD_MAX];           /* S3-M5：每任务打开文件表 */
 } task_t;
 
 extern task_t *current;

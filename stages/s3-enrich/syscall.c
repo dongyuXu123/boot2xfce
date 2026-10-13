@@ -71,6 +71,44 @@ void syscall_dispatch(struct regs *r) {
         }
         break;
     }
+    case 11: {                                  /* open(name) → fd */
+        static char kn[16];
+        for (int i = 0; i < 15; i++) {
+            kn[i] = ((char *)(uintptr_t)r->ebx)[i];
+            if (!kn[i]) break;
+        }
+        kn[15] = 0;
+        r->eax = (uint32_t)fd_open(current, kn);
+        break;
+    }
+    case 12: {                                  /* read(fd, ubuf, n) */
+        uint32_t ub = r->ecx, n2 = r->edx;
+        static char kb[512];
+        if (!uptr_ok(ub, n2) || n2 > 512) { r->eax = (uint32_t)-1; break; }
+        int rr = fd_read(current, (int)r->ebx, kb, n2);
+        if (rr > 0) memcpy((void *)(uintptr_t)ub, kb, (uint32_t)rr);
+        r->eax = (uint32_t)rr;
+        break;
+    }
+    case 13: {                                  /* write(fd, ubuf, n) */
+        uint32_t ub = r->ecx, n2 = r->edx;
+        static char kb2[512];
+        if (!uptr_ok(ub, n2) || n2 > 512) { r->eax = (uint32_t)-1; break; }
+        memcpy(kb2, (void *)(uintptr_t)ub, n2);
+        if ((int)r->ebx == 1) {                 /* fd1 = 控制台 */
+            for (uint32_t i = 0; i < n2; i++) { char b[2] = { kb2[i], 0 }; print(b); }
+            r->eax = n2;
+        } else {
+            r->eax = (uint32_t)fd_write(current, (int)r->ebx, kb2, n2);
+        }
+        break;
+    }
+    case 14:                                    /* close(fd) */
+        r->eax = (uint32_t)fd_close(current, (int)r->ebx);
+        break;
+    case 15:                                    /* lseek(fd, off, whence) */
+        r->eax = (uint32_t)fd_lseek(current, (int)r->ebx, (int32_t)r->ecx, (int)r->edx);
+        break;
     default:
         r->eax = (uint32_t)-1;
         break;

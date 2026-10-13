@@ -71,3 +71,29 @@ void ramfs_list(void) {
     }
     print("\n");
 }
+
+/* ---------- VFS 挂接：把 ramfs 节点包成 vnode ---------- */
+static int rv_read(struct vnode *v, void *buf, uint32_t len, uint32_t off) {
+    struct rfile *f = v->data;
+    if (off >= f->size) return 0;
+    if (off + len > f->size) len = f->size - off;
+    memcpy(buf, f->data + off, len);
+    return (int)len;
+}
+static int rv_write(struct vnode *v, const void *buf, uint32_t len, uint32_t off) {
+    struct rfile *f = v->data;
+    if (off + len > FILE_MAX) len = FILE_MAX - off;
+    memcpy(f->data + off, buf, len);
+    if (off + len > f->size) f->size = off + len;
+    return (int)len;
+}
+static const struct file_ops ramfs_ops = { rv_read, rv_write };
+static struct vnode rv_node;                 /* 单节点包装：ops 固定，data 指向命中的 rfile */
+
+struct vnode *ramfs_lookup_vnode(const char *name) {
+    struct rfile *f = lookup(name);
+    if (!f) return 0;
+    rv_node.ops = &ramfs_ops;
+    rv_node.data = f;
+    return &rv_node;
+}
