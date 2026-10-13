@@ -28,7 +28,7 @@ void syscall_dispatch(struct regs *r) {
         break;
     case 3:                                     /* exit */
         current->state = T_DEAD;
-        print("S2: [user] exit, pid=");
+        print("S3: [user] exit, pid=");
         print_dec(current->pid);
         print("\n");
         r->eax = 0;
