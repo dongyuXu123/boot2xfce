@@ -47,10 +47,9 @@ void syscall_dispatch(struct regs *r) {
     }
     case 8: {                                   /* wait()：收尸一个死子，阻塞 */
         for (;;) {
-            task_t *z = 0;
-            extern task_t *task_wait_scan(uint32_t pid);
-            z = task_wait_scan(current->pid);
-            if (z) { r->eax = z->pid; break; }
+            extern uint32_t task_wait_scan(uint32_t pid);
+            uint32_t zpid = task_wait_scan(current->pid);
+            if (zpid) { r->eax = zpid; break; }
             schedule();                          /* 还没有就让出 CPU（无阻塞原语的教学实现） */
         }
         break;

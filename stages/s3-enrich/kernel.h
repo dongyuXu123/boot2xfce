@@ -62,7 +62,11 @@ static inline uint32_t read_cr2(void) {
     __asm__ volatile("mov %%cr2,%0" : "=r"(v));
     return v;
 }
+/* load_cr3 必须同步记录 active_pd：缺页处理全靠它找当前页目录。
+ * （曾经的 bug：只动 CR3 不记变量，切任务后 COW/按需全写进幽灵表） */
+extern uint32_t *active_pd;
 static inline void load_cr3(uint32_t pa) {
+    active_pd = (uint32_t *)(uintptr_t)pa;
     __asm__ volatile("mov %0,%%cr3" :: "r"(pa));
 }
 static inline void reload_cr3(void) {
@@ -120,7 +124,6 @@ uint32_t *current_pd(void);
 uint32_t *page_kernel_pd(void);
 void page_copy_space(uint32_t *dst, uint32_t *src);
 void page_fault_handler(uint32_t err, uint32_t va);
-extern uint32_t *active_pd;              /* 正在用的页目录物理地址 */
 
 /* ---------- ramfs.c ---------- */
 void ramfs_init(void);
@@ -158,6 +161,7 @@ extern task_t *current;
 void tasks_init(void);
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
+uint32_t task_wait_scan(uint32_t pid);                /* 收尸一个死子，返回其 pid */
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));
 void task_yield(void);                  /* 内核任务主动让出 CPU */

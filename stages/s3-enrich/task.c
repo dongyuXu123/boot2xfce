@@ -147,15 +147,16 @@ void schedule(void) {
     switch_to(&prev->kesp, next->kesp);
 }
 
-/* wait 的扫描半边：找到一个属于 pid 的死子并回收（栈/页目录/槽位） */
-task_t *task_wait_scan(uint32_t pid) {
+/* wait 的扫描半边：找到属于 pid 的死子并回收，返回其 pid（0=没有） */
+uint32_t task_wait_scan(uint32_t pid) {
     for (int i = 0; i < MAX_TASKS; i++) {
         task_t *t = &tasks[i];
         if (t->state == T_DEAD && t->ppid == pid) {
+            uint32_t zpid = t->pid;              /* 先存：清槽后结构体即失效 */
             if (t->kstack) kfree(t->kstack);
             if (t->pd) page_dir_destroy(t->pd);
             memset(t, 0, sizeof(*t));            /* 槽位回 T_EMPTY */
-            return t;                            /* 注意：pid 已被清零，调用方先存 */
+            return zpid;
         }
     }
     return 0;

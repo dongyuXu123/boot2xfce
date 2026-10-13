@@ -68,6 +68,5 @@ utask_trampoline_forked:
     pop fs
     pop es
     pop ds
-    popa
-    add esp, 4                  ; 跳过 popa 跳过的 esp 占位槽
+    popa                        ; 内部自带 esp 占位槽的跳过，外部不要再加
     iretd

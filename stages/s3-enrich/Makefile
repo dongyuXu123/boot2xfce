@@ -46,7 +46,7 @@ test: $(B)/boot.iso
 	@ok=1; \
 	for m in "S3: GDT/IDT/PIC/PIT ready" "S3: pmm frames=" "S3: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S3: kernel core ready" \
-	         "S3: demand page OK" "S3: per-task pd OK" "[user] hello from ring3"; do \
+	         "S3: demand page OK" "S3: per-task pd OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5"; do \
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s3 缺少标记: $$m"; ok=0; }; \
 	done; \
 	[ $$ok = 1 ] && echo "[PASS] s3" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }
