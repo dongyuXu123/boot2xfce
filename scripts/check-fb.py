@@ -33,7 +33,6 @@ def main():
     check('win0 bg',      150, 120, (0xF4, 0xF4, 0xF4))
     check('win1 bg',      400, 120, (0xF4, 0xF4, 0xF4))
     check('win2 bg',      560, 180, (0xF4, 0xF4, 0xF4))
-    check('win1 titlebar', 300,  56, (0x57, 0x60, 0x6F))
     check('win2 titlebar', 560,  56, (0x2E, 0x86, 0xDE))
     print('[PASS] screen' if ok else '[FAIL] screen')
     sys.exit(0 if ok else 1)

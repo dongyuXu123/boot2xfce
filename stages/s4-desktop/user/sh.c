@@ -16,7 +16,9 @@ void user_main(void) {
         if (n <= 0) continue;
         if (line[0] == 0) continue;
         if (n > 0 && line[n-1] == '\n') line[n-1] = 0; else line[n] = 0;
-        if (streq(line, "help")) {
+        if (streq(line, "clear")) {
+            sys(13, 0, (intptr_t)"\f", 1);       /* 窗口清屏 */
+        } else if (streq(line, "help")) {
             uprint("cmds: ls cd mkdir rm pwd cat run hello echo gfx calc clock notepad help\n");
         } else if (streq(line, "pwd")) {
             char b[128];

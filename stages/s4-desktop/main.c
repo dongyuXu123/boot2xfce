@@ -58,6 +58,9 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     /* ---- 程序入库：/bin/init（自启）与 /bin/hello（execve 目标） ---- */
     extern uint8_t init_blob[], init_blob_end[], hello_blob[], hello_blob_end[];
     extern uint8_t sh_blob[], sh_blob_end[];
+    extern uint8_t calc_blob[], calc_blob_end[];
+    extern uint8_t clock_blob[], clock_blob_end[];
+    extern uint8_t notepad_blob[], notepad_blob_end[];
     ramfs_write("/bin/init",  init_blob,  init_blob_end - init_blob);
     ramfs_write("/bin/hello", hello_blob, hello_blob_end - hello_blob);
     ramfs_write("/bin/sh",    sh_blob,    sh_blob_end - sh_blob);
