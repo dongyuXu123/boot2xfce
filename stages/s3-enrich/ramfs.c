@@ -3,7 +3,7 @@
 #include "kernel.h"
 
 #define MAX_FILES   8
-#define FILE_MAX    512
+#define FILE_MAX    16384          /* ELF 段对齐垫大，16K 稳妥（M4） */
 
 struct rfile {
     char     name[16];
@@ -60,7 +60,7 @@ int ramfs_read(const char *name, void *buf, uint32_t max) {
 }
 
 void ramfs_list(void) {
-    print("S2: ramfs ls:");
+    print("S3: ramfs ls:");
     for (int i = 0; i < MAX_FILES; i++) {
         if (!files[i].used) continue;
         print(" ");

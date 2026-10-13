@@ -48,24 +48,24 @@ void kmain(uint32_t magic, struct mb_info *mb) {
         for (;;) hlt();
     }
 
-    /* ---- 进程：轮转任务 + 键盘 + blob 用户任务（M2 起带独立页目录） ---- */
+    /* ---- 程序入库：/bin/init（自启）与 /bin/hello（execve 目标） ---- */
+    extern uint8_t init_blob[], init_blob_end[], hello_blob[], hello_blob_end[];
+    ramfs_write("/bin/init",  init_blob,  init_blob_end - init_blob);
+    ramfs_write("/bin/hello", hello_blob, hello_blob_end - hello_blob);
+
+    /* ---- 进程：轮转任务 + 键盘 + ELF 方式启动的 init ---- */
     tasks_init();
-    extern uint8_t user_blob[], user_blob_end[];
-    memcpy((void *)USER_BASE, user_blob, (uint32_t)(user_blob_end - user_blob));
     task_create(task_a, 0);
     task_create(task_b, 0);
     task_create(kbd_task, 0);
-    {   /* 用户任务的代码页：先写物理帧，再映进它自己的页目录（用户可读） */
+    {
         task_t *u = task_create(NULL, 1);
-        uint32_t pages = (user_blob_end - user_blob + 4095) / 4096;
-        for (uint32_t i = 0; i < pages; i++)
-            page_map(u->pd, USER_BASE + i * 4096, USER_BASE + i * 4096, 1, 1);
-        /* 用户栈页 */
-        for (uint32_t va = USER_TOP - 0x4000; va < USER_TOP; va += 4096) {
-            uint32_t pa = pmm_alloc_frame();
-            page_map(u->pd, va, pa, 1, 1);
+        if (task_exec_image(u, "/bin/init") == 0)
+            print("S3: per-task pd + ELF image OK\n");
+        else {
+            print("S3: exec image BROKEN\n");
+            for (;;) hlt();
         }
-        print("S3: per-task pd OK\n");
     }
 
     print("S3: kernel core ready, starting scheduler\n");

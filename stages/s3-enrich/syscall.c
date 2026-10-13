@@ -54,6 +54,23 @@ void syscall_dispatch(struct regs *r) {
         }
         break;
     }
+    case 10: {                                  /* execve(name)：原位换像 */
+        static char kname[16];                  /* 用户指针先拷进内核（铁律） */
+        for (int i = 0; i < 15; i++) {
+            kname[i] = ((char *)(uintptr_t)r->ebx)[i];
+            if (!kname[i]) break;
+        }
+        kname[15] = 0;
+        if (task_exec_image(current, kname) == 0) {
+            /* 改写 int 0x80 的 iret 帧：iretd 一执行就落进新程序 */
+            r->eip = current->ueip;
+            r->esp = current->uesp;
+            r->eax = 0;
+        } else {
+            r->eax = (uint32_t)-1;
+        }
+        break;
+    }
     default:
         r->eax = (uint32_t)-1;
         break;

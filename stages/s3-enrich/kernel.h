@@ -123,6 +123,8 @@ uint32_t page_va2pa(uint32_t *pd, uint32_t va);
 uint32_t *current_pd(void);
 uint32_t *page_kernel_pd(void);
 void page_copy_space(uint32_t *dst, uint32_t *src);
+uint32_t task_frame_unref(uint32_t pa);
+void page_dir_clear_user(uint32_t *pd);
 void page_fault_handler(uint32_t err, uint32_t va);
 
 /* ---------- ramfs.c ---------- */
@@ -162,6 +164,7 @@ void tasks_init(void);
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 uint32_t task_wait_scan(uint32_t pid);                /* 收尸一个死子，返回其 pid */
+int  task_exec_image(task_t *t, const char *name);    /* ELF 换像（M4） */
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));
 void task_yield(void);                  /* 内核任务主动让出 CPU */

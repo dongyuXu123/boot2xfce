@@ -10,11 +10,11 @@ CFLAGS   := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
 ASFLAGS  := -f elf32
 LDFLAGS  := -m elf_i386 -nostdlib -T kernel.ld --build-id=none
 UCFLAGS  := -m32 -ffreestanding -fno-pie -fno-stack-protector -fno-builtin \
-            -nostdlib -nostdinc -O1 -g -Wall -Wextra
+            -nostdlib -nostdinc -O1 -Wall -Wextra
 
 KOBJS := build/boot.o build/cpu.o build/isr.o build/console.o build/gdt.o build/page.o \
          build/idt.o build/irq.o build/mm.o build/task.o build/ramfs.o \
-         build/syscall.o build/main.o build/blob.o
+         build/syscall.o build/main.o build/elf.o build/init_blob.o build/hello_blob.o
 
 B := build
 
@@ -29,15 +29,23 @@ build/%.o: %.c kernel.h | $(B)
 build/%.o: %.asm | $(B)
 	$(NASM) $(ASFLAGS) $< -o $@
 
-# 用户程序：入口桩在镜像最前，静态链接到 0x400000，objcopy 出平铺二进制
-build/user.bin: user.c user_start.asm | $(B)
-	$(NASM) $(ASFLAGS) user_start.asm -o $(B)/user_start.o
-	$(CC) $(UCFLAGS) -c user.c -o $(B)/user.o
+# 用户程序：独立 32 位 ELF（-static -no-pie，入口桩保证 _start 在最前）
+build/init.elf: user/init.c user/ulib.h user/user_start.asm | $(B)
+	$(NASM) $(ASFLAGS) user/user_start.asm -o $(B)/user_start.o
+	$(CC) $(UCFLAGS) -c user/init.c -o $(B)/init.o
 	$(LD) -m elf_i386 -nostdlib -static -no-pie -Ttext=0x400000 \
-		--build-id=none -o $(B)/user.elf $(B)/user_start.o $(B)/user.o
-	objcopy -O binary $(B)/user.elf $@
+		-N --build-id=none -o $@ $(B)/user_start.o $(B)/init.o
 
-build/blob.o: blob.asm build/user.bin | $(B)
+build/hello.elf: user/hello.c user/ulib.h user/user_start.asm | $(B)
+	$(CC) $(UCFLAGS) -c user/hello.c -o $(B)/hello.o
+	$(LD) -m elf_i386 -nostdlib -static -no-pie -Ttext=0x400000 \
+		-N --build-id=none -o $@ $(B)/user_start.o $(B)/hello.o
+
+build/init_blob.o: init_blob.asm build/init.elf | $(B)
+	$(NASM) $(ASFLAGS) $< -o $@
+
+build/hello_blob.o: hello_blob.asm build/hello.elf | $(B)
+	$(NASM) $(ASFLAGS) $< -o $@
 
 test: $(B)/boot.iso
 	@rm -f $(B)/serial.log
@@ -46,7 +54,7 @@ test: $(B)/boot.iso
 	@ok=1; \
 	for m in "S3: GDT/IDT/PIC/PIT ready" "S3: pmm frames=" "S3: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S3: kernel core ready" \
-	         "S3: demand page OK" "S3: per-task pd OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5"; do \
+	         "S3: demand page OK" "S3: per-task pd OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5" "[hello] ELF exec OK" "S3: ramfs ls:"; do \
 		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s3 缺少标记: $$m"; ok=0; }; \
 	done; \
 	[ $$ok = 1 ] && echo "[PASS] s3" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }

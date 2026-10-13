@@ -26,7 +26,8 @@ uint32_t *active_pd = 0;
 static uint8_t frame_ref[FRAME_MAX];     /* 32KiB，.bss 清零即全 0 */
 static uint32_t ref_get(uint32_t pa) { return frame_ref[pa / 4096]; }
 static void ref_inc(uint32_t pa)     { frame_ref[pa / 4096]++; }
-static uint32_t ref_dec(uint32_t pa) { return --frame_ref[pa / 4096]; }        /* 正在用的页目录（load_cr3 顺手记录） */
+static uint32_t ref_dec(uint32_t pa) { return --frame_ref[pa / 4096]; }
+uint32_t task_frame_unref(uint32_t pa) { return ref_dec(pa); }   /* 供 elf.c 用 */        /* 正在用的页目录（load_cr3 顺手记录） */
 
 static uint32_t *boot_pd;       /* 内核启动页目录（所有任务共用其内核部分） */
 
