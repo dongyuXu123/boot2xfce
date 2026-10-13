@@ -20,6 +20,12 @@ extern void utask_trampoline(void);     /* cpu.asm */
 
 /* 内核任务蹦床：入口函数跑完 → 标记 DEAD → 永久休眠（栈留在那儿，S3 收尸） */
 static void ktask_trampoline(void) {
+    /* switch_to 不保存 EFLAGS：第一次被切进来时 IF 还停在上一现场
+     * （中断门把它清了）。这里 sti 重建"任务恒在 IF=1 下运行"的不变量，
+     * 之后的 IF 由各任务的 iret 帧天然保存/恢复。
+     * （此 bug 由 L18 的 sendkey 实测揪出：症状是 PIC 的 IRR 里 IRQ1
+     *   永远 pending——整个系统只剩软触发中断在跑。） */
+    sti();
     current->entry();
     current->state = T_DEAD;
     print("S2: task ");

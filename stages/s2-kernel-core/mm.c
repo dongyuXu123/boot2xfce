@@ -47,7 +47,10 @@ void pmm_init(struct mb_info *mb) {
         return;
     }
 
-    /* 固定保留区：内核映像 / 堆 / 用户区（代码+栈） */
+    /* 固定保留区：低 1MiB（BIOS/实模式/IVT——不保留的话 alloc 从帧 0
+     * 扫起会把 0x0 当可分配页，此 bug 由课程的 alloc/free 断言揪出）
+     * + 内核映像 / 堆 / 用户区（代码+栈） */
+    reserve_range(0, 0x100000u);
     reserve_range(0x100000u, (uint32_t)(uintptr_t)kernel_end);
     reserve_range(HEAP_START, HEAP_END);
     reserve_range(USER_BASE, USER_BASE + 0x100000u);

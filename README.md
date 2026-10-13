@@ -20,13 +20,21 @@ make -C stages/s2-kernel-core run   # 想亲眼看：带图形窗口启动 S2
 
 通过标志：串口日志中出现各阶段约定标记（见各阶段 Makefile 的 test 目标）。
 
+## 学习路线：course/ 动手课程（推荐入口）
+
+**从零学习请直接进 [`course/`](course/README.md)**：19 课按小功能分课
+（L01 引导扇区 → L19 毕业设计），每课 = 可构建小项目 + TODO 桩 + 任务书 +
+串口断言验收——桩态必红、按任务书写完必绿，`make test` 说了算。
+`stages/` 是课程完成后对应的参考答案（也是大框架本体）。
+
 ## 目录
 
 | 路径 | 内容 |
 |---|---|
-| `stages/s0-mbr/` | S0 实模式 MBR：BIOS 加电 → 0x7C00，VGA+串口问好 |
-| `stages/s1-grub/` | S1 GRUB(Multiboot) 引导最小内核，解析内存信息 |
-| `stages/s2-kernel-core/` | S2 内核基础框架：物理内存+堆 / 任务+轮转调度 / ramfs / int 0x80 + ring3 |
+| `course/` | **动手课程（学习入口）**：19 课按小功能分课，桩+任务书+串口验收 |
+| `stages/s0-mbr/` | S0 实模式 MBR：BIOS 加电 → 0x7C00，VGA+串口问好（课程参考答案） |
+| `stages/s1-grub/` | S1 GRUB(Multiboot) 引导最小内核，解析内存信息（课程参考答案） |
+| `stages/s2-kernel-core/` | S2 内核基础框架：物理内存+堆 / 任务+轮转调度 / ramfs / int 0x80 + ring3（课程参考答案） |
 | `stages/s3-enrich/` | S3 规划占位（见 ROADMAP） |
 | `stages/s4-desktop/` | S4 规划占位（见 ROADMAP） |
 | `docs/` | 源码导读与原理笔记（加电 / GRUB / Linux / Xfce） |
