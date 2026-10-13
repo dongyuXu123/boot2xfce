@@ -53,6 +53,12 @@
 
 ## S4 桌面结合（Xfce）
 
+**当前状态（2026-10-13）**：
+- Track B（自研内核 GUI）：`stages/s4-desktop` 已实现 VBE/Dispi+PCI LFB、
+  图元与字体、窗口系统、shell `gfx` 命令；**WIP**——init 的 fork 在 S4 环境下
+  触发 UD 异常（fork×低区池交互，线索见 stages/s4-desktop/README.md）。
+- Track A（真栈 Xfce）：脚本化方案见 scripts/trackA-README.md。
+
 双轨制，A 先 B 后，最终对照合流：
 
 **Track A —— 真栈复现（可脚本化、可复现）**

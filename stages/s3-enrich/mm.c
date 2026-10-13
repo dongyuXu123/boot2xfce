@@ -58,6 +58,20 @@ void pmm_init(struct mb_info *mb) {
 
 uint32_t pmm_total_frames(void) { return pmm_total; }
 
+/* 低区分配：只在 [kernel_end, 4MiB) 内找帧。凡"内核要先清零、再映进
+ * 任务地址空间"的帧（页表/按需页/COW 副本/ELF 段）都必须走这里——
+ * 4MiB 以下属于 PDE0，被所有页目录继承，内核在任意任务视角都能摸到。
+ * （教训：S4 影子缓冲把空闲帧推过 4MiB 后，fork 的页表帧落进用户
+ *   PDE1 视角盲区，内核 memset 直接缺页。）
+ * 代价：低区只有 ~900KB（约 220 帧），教学规模够用。 */
+uint32_t low_hint = 0;
+uint32_t pmm_alloc_frame_low(void) {
+    if (!low_hint) low_hint = ((uint32_t)(uintptr_t)kernel_end + 4095) / 4096u;
+    for (uint32_t f = low_hint; f < 0x200000u / 4096u; f++)
+        if (!bm_get(f)) { bm_set(f); low_hint = f + 1; return f * 4096u; }
+    return pmm_alloc_frame();            /* 低区耗尽：退回普通分配（内核视角用） */
+}
+
 uint32_t pmm_alloc_frame(void) {
     for (uint32_t f = pmm_hint; f < pmm_total; f++)
         if (!bm_get(f)) { bm_set(f); pmm_hint = f + 1; return f * 4096u; }

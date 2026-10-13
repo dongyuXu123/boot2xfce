@@ -1,0 +1,142 @@
+/* mm.c —— 物理页帧位图（PMM，来自 Multiboot 内存映射）
+ *        + 固定区堆 kmalloc/kfree（首次适应 + 后向合并）
+ * S2 只做这两个；分页/虚存/按需调页留给 S3。 */
+#include "kernel.h"
+
+/* ---------- 物理页帧管理：1 位 = 1 页(4KiB)，0=空闲 1=已占 ---------- */
+#define PMM_LIMIT   0x20000000u            /* 管到 512MiB，够教学用 */
+#define PMM_FRAMES  (PMM_LIMIT / 4096)
+static uint8_t  pmm_bm[PMM_FRAMES / 8];    /* 16KiB，在内核 .bss 里 */
+static uint32_t pmm_total;
+static uint32_t pmm_hint;                  /* 分配扫描提示，加速 first-fit */
+
+extern uint8_t kernel_end[];               /* kernel.ld 导出的内核映像末尾 */
+
+static inline void bm_set(uint32_t f)  { pmm_bm[f >> 3] |=  (1u << (f & 7)); }
+static inline int  bm_get(uint32_t f)  { return pmm_bm[f >> 3] & (1u << (f & 7)); }
+
+static void reserve_range(uint32_t base, uint32_t end) {
+    for (uint32_t a = (base + 4095) & ~4095u; a < end; a += 4096)
+        bm_set(a / 4096);
+}
+
+void pmm_init(struct mb_info *mb) {
+    memset(pmm_bm, 0, sizeof(pmm_bm));
+    pmm_total = 0;
+
+    if (mb->flags & (1u << 6)) {       /* GRUB 给了 E820 映射（PC 上通常都有） */
+        struct mb_mmap *e   = (struct mb_mmap *)(uintptr_t)mb->mmap_addr;
+        struct mb_mmap *end = (struct mb_mmap *)(uintptr_t)(mb->mmap_addr + mb->mmap_length);
+        for (; (uintptr_t)e < (uintptr_t)end;
+             e = (struct mb_mmap *)(uintptr_t)((uintptr_t)e + e->size + 4)) {
+            if (e->type != 1) continue;
+            uint32_t base = (uint32_t)e->addr;
+            uint32_t lim  = (uint32_t)(e->addr + e->len);
+            if (lim > PMM_LIMIT) lim = PMM_LIMIT;
+            if (base < 0x100000u) base = 0x100000u;    /* 低 1MiB 给 BIOS/实模式 */
+            base = (base + 4095) & ~4095u;
+            for (uint32_t a = base; a + 4096 <= lim; a += 4096)
+                pmm_total++;
+        }
+    } else if (mb->flags & 1u) {       /* 兜底：只有 mem_upper，按连续可用算 */
+        uint32_t lim = 0x100000u + mb->mem_upper * 1024u;
+        if (lim > PMM_LIMIT) lim = PMM_LIMIT;
+        pmm_total = (lim - 0x100000u) / 4096u;
+    } else {
+        print("S2: pmm: no memory info from grub!\n");
+        return;
+    }
+
+    /* 固定保留区：低 1MiB（BIOS/实模式/IVT——不保留的话 alloc 从帧 0
+     * 扫起会把 0x0 当可分配页，此 bug 由课程的 alloc/free 断言揪出）
+     * + 内核映像 / 堆 / 用户区（代码+栈） */
+    reserve_range(0, 0x100000u);
+    reserve_range(0x100000u, (uint32_t)(uintptr_t)kernel_end);   /* 内核镜像 */
+    reserve_range(0x200000u, 0x400000u);   /* 堆（pmm 不得染指） */
+    reserve_range(USER_BASE, USER_BASE + 0x100000u);   /* 用户区 */
+    /* 低区池 [0x120000,0x200000) 不 reserve：由 pmm_alloc_frame_low 专用，
+     * 普通分配器按边界跳过。
+     * （保留区清单曾漏掉堆：普通分配器第一帧落在堆头上，boot_pd 与
+     *   heap 空闲链互相覆盖——全场诡异现象的 total 根因） */
+}
+
+uint32_t pmm_total_frames(void) { return pmm_total; }
+
+/* 低区分配：只在 [0x180000, 0x200000)（堆之上、PDE0 覆盖内）找帧。
+ * 凡"内核要先清零、再映进任务地址空间"的帧（页表/按需页/COW 副本/
+ * ELF 段）都必须走这里——4MiB 以下被所有页目录继承，内核在任意任务
+ * 视角都摸得到；高区帧在用户页目录视角是盲区。
+ * 池约 220 帧，教学规模够用；耗尽打印并返回 0（绝不静默回退高区）。 */
+uint32_t low_hint;
+uint32_t pmm_alloc_frame_low(void) {
+    if (!low_hint) low_hint = 0x120000u / 4096u;
+    for (uint32_t f = low_hint; f < 0x200000u / 4096u; f++)
+        if (!bm_get(f)) { bm_set(f); low_hint = f + 1; return f * 4096u; }
+    print("S4: LOW FRAMES EXHAUSTED\n");
+    return 0;
+}
+
+uint32_t pmm_alloc_frame(void) {
+    for (uint32_t f = pmm_hint; f < pmm_total; f++) {
+        if (f >= 0x120000u / 4096u && f < 0x200000u / 4096u) continue;  /* 低区池专用 */
+        if (!bm_get(f)) { bm_set(f); pmm_hint = f + 1; return f * 4096u; }
+    }
+    return 0;
+}
+
+extern uint32_t low_hint;
+void pmm_free_frame(uint32_t addr) {
+    uint32_t f = addr / 4096;
+    if (f < pmm_total) {
+        pmm_bm[f >> 3] &= (uint8_t)~(1u << (f & 7));
+        pmm_hint = f;
+        if (f >= 0x120000u / 4096u && f < 0x200000u / 4096u && f < low_hint)
+            low_hint = f;                 /* 低区帧回收：把扫描提示拉回去 */
+    }
+}
+
+/* ---------- 堆：块头 12B，首次适应，kfree 向后合并 ---------- */
+struct hb {
+    uint32_t    size;      /* 不含块头 */
+    uint32_t    used;
+    struct hb  *next;
+};
+static struct hb *heap_head;
+
+void heap_init(void) {
+    heap_head = (struct hb *)HEAP_START;
+    heap_head->size = HEAP_END - HEAP_START - sizeof(struct hb);
+    heap_head->used = 0;
+    heap_head->next = NULL;
+}
+
+void *kmalloc(uint32_t n) {
+    n = (n + 3) & ~3u;                 /* 4 字节对齐 */
+    for (struct hb *b = heap_head; b; b = b->next) {
+        if (b->used || b->size < n) continue;
+        if (b->size >= n + sizeof(struct hb) + 8) {   /* 够大就切一块 */
+            struct hb *r = (struct hb *)((uint8_t *)b + sizeof(struct hb) + n);
+            r->size = b->size - n - sizeof(struct hb);
+            r->used = 0;
+            r->next = b->next;
+            b->size = n;
+            b->next = r;
+        }
+        b->used = 1;
+        return (uint8_t *)b + sizeof(struct hb);
+    }
+    return NULL;
+}
+
+void kfree(void *p) {
+    if (!p) return;
+    struct hb *b = (struct hb *)((uint8_t *)p - sizeof(struct hb));
+    b->used = 0;
+    for (struct hb *c = b; c->next; ) {            /* 向后合并空闲邻居 */
+        if (c->used) { c = c->next; continue; }
+        struct hb *n = c->next;
+        if (n->used) { c = n; continue; }
+        c->size += sizeof(struct hb) + n->size;
+        c->next  = n->next;
+    }
+}

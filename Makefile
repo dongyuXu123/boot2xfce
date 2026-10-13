@@ -1,5 +1,5 @@
 # 顶层 Makefile：一次跑通所有阶段
-STAGES := stages/s0-mbr stages/s1-grub stages/s2-kernel-core
+STAGES := stages/s0-mbr stages/s1-grub stages/s2-kernel-core stages/s3-enrich
 
 .PHONY: all test test-all clean env
 all test clean:

@@ -54,7 +54,7 @@ static int elf_load_pd(uint32_t *pd, const uint8_t *img, uint32_t size, uint32_t
         for (uint32_t va = ph->p_vaddr & ~0xFFFu;
              va < ph->p_vaddr + ph->p_memsz; va += 4096) {
             if (page_va2pa(pd, va)) continue;            /* 已有页不重复盖 */
-            uint32_t pa = pmm_alloc_frame();
+            uint32_t pa = pmm_alloc_frame_low();
             if (!pa) return -1;
             memset((void *)pa, 0, 4096);
             page_map(pd, va, pa, 1, 1);
@@ -104,7 +104,7 @@ int task_exec_image(task_t *t, const char *name) {
 
     /* 用户栈：栈顶往下 4 页 */
     for (uint32_t va = USER_TOP - 0x4000; va < USER_TOP; va += 4096) {
-        uint32_t pa = pmm_alloc_frame();
+        uint32_t pa = pmm_alloc_frame_low();
         if (!pa) return -1;
         memset((void *)pa, 0, 4096);
         page_map(t->pd, va, pa, 1, 1);

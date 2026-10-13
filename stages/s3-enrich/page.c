@@ -36,10 +36,13 @@ uint32_t *page_dir_create(void) {
     uint32_t pd_pa = pmm_alloc_frame();
     uint32_t *pd = (uint32_t *)pd_pa;
     memset(pd, 0, 4096);
-    /* 内核区（低 1GiB 的恒等映射）整表继承自 boot_pd：
-     * 直接拷 0..USER_BASE 段的所有 PDE——内核映射每任务一份影子 */
-    for (uint32_t i = 0; i < PD_INDEX(USER_BASE); i++)
+    /* 内核区整表继承自 boot_pd，但【跳过用户窗口的 PDE1-4】——
+     * 那四项在任务里必须是任务自己的用户页表，绝不能带上内核的
+     * 恒等映射视图（否则用户态能看见别人的物理内存） */
+    for (uint32_t i = 0; i < 1024; i++) {
+        if (i >= PD_INDEX(USER_BASE) && i < PD_INDEX(USER_BASE + USER_SPAN)) continue;
         pd[i] = boot_pd[i];
+    }
     return pd;
 }
 
@@ -67,7 +70,7 @@ void page_copy_space(uint32_t *dst, uint32_t *src) {
         /* 子的页表也直接共享同一张（项级 COW 时再改）——共享页表必须
          * 只读，且页目录项不可再被 walk 的 create 路径改写：
          * 教学简化：给子单独复制页表结构，逐项共享帧 */
-        uint32_t pt_pa = pmm_alloc_frame();
+        uint32_t pt_pa = pmm_alloc_frame_low();
         memset((void *)pt_pa, 0, 4096);
         dst[i] = pt_pa | PG_P | PG_RW | PG_US;
         uint32_t *dpt = (uint32_t *)pt_pa;
@@ -93,7 +96,7 @@ static uint32_t *walk(uint32_t *pd, uint32_t va, int create) {
     uint32_t i = PD_INDEX(va);
     if (!(pd[i] & PG_P)) {
         if (!create) return 0;
-        uint32_t pt_pa = pmm_alloc_frame();
+        uint32_t pt_pa = pmm_alloc_frame_low();
         if (!pt_pa) return 0;
         memset((void *)pt_pa, 0, 4096);
         pd[i] = pt_pa | PG_P | PG_RW | (va >= USER_BASE ? PG_US : 0);
@@ -125,14 +128,11 @@ uint32_t page_va2pa(uint32_t *pd, uint32_t va) {
 void paging_init(void) {
     boot_pd = (uint32_t *)pmm_alloc_frame();
     memset(boot_pd, 0, 4096);
-    /* 低 16MiB：内核 + 堆 + 用户窗口区，恒等映射且放开 U/S
-     * （M1 尚无每任务地址空间，语义与 S2 的"无隔离"一致；
-     *   M2 起用户窗口改由各任务自己的页目录提供，内核区收回 U/S）
-     * [16MiB, 128MiB)：其余物理 RAM 仅供内核恒等访问（supervisor）。
-     * 内核要清零任何物理帧（页表/用户页），都得先被映射到。 */
-    for (uint32_t pa = 0; pa < 0x1000000u; pa += 4096)
-        page_map(boot_pd, pa, pa, 1, 1);
-    for (uint32_t pa = 0x1000000u; pa < 0x8000000u; pa += 4096)
+    /* 全部 128MiB 恒等映射、一律 supervisor——这是"内核视角"的页目录：
+     * 用户页（US=1）只存在于各任务自己的页目录里。
+     * （曾把低 16MiB 放开 US：page_dir_create 继承内核区后，用户任务
+     *   可以透过恒等映射直写内核——隔离形同虚设，S4 收回） */
+    for (uint32_t pa = 0; pa < 0x8000000u; pa += 4096)
         page_map(boot_pd, pa, pa, 0, 1);
     load_cr3((uint32_t)boot_pd);
     enable_paging();
@@ -155,7 +155,7 @@ void page_fault_handler(uint32_t err, uint32_t va) {
         if (pte && (*pte & PG_P) && (*pte & PG_COW)) {
             uint32_t pa = *pte & ~0xFFF;
             if (ref_get(pa) > 1) {              /* 还有人在共享 → 复制一份 */
-                uint32_t npa = pmm_alloc_frame();
+                uint32_t npa = pmm_alloc_frame_low();
                 if (!npa) goto panic;
                 memcpy((void *)npa, (void *)pa, 4096);
                 ref_dec(pa);
@@ -169,7 +169,7 @@ void page_fault_handler(uint32_t err, uint32_t va) {
     }
     if (!(err & 1) && va >= USER_BASE && va < USER_BASE + USER_SPAN) {
         /* 按需零页：bss/栈的延迟就位（M3 在此之前插 COW 判定） */
-        uint32_t pa = pmm_alloc_frame();
+        uint32_t pa = pmm_alloc_frame_low();
         if (!pa) goto panic;
         memset((void *)pa, 0, 4096);
         page_map(active_pd, va & ~0xFFFu, pa, 1, 1);
