@@ -33,7 +33,10 @@ static uint32_t *boot_pd;       /* 内核启动页目录（所有任务共用其
 
 /* ---------- 页目录生命周期 ---------- */
 uint32_t *page_dir_create(void) {
-    uint32_t pd_pa = pmm_alloc_frame();
+    /* pd 必须落在 PDE0 覆盖的低区：内核要在"任意任务视角"下清零并
+     * 遍历它；普通分配器的高区帧在用户页目录里不可见（本 bug 曾让
+     * 子进程页目录变成散落零页，CR3 一换即死——S3 纯属地理 luck） */
+    uint32_t pd_pa = pmm_alloc_frame_low();
     uint32_t *pd = (uint32_t *)pd_pa;
     memset(pd, 0, 4096);
     /* 内核区整表继承自 boot_pd，但【跳过用户窗口的 PDE1-4】——

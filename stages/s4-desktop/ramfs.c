@@ -60,7 +60,7 @@ int ramfs_read(const char *name, void *buf, uint32_t max) {
 }
 
 void ramfs_list(void) {
-    print("S3: ramfs ls:");
+    print("S4: ramfs ls:");
     for (int i = 0; i < MAX_FILES; i++) {
         if (!files[i].used) continue;
         print(" ");

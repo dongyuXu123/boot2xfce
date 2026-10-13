@@ -33,7 +33,10 @@ static uint32_t *boot_pd;       /* 内核启动页目录（所有任务共用其
 
 /* ---------- 页目录生命周期 ---------- */
 uint32_t *page_dir_create(void) {
-    uint32_t pd_pa = pmm_alloc_frame();
+    /* pd 必须落在 PDE0 覆盖的低区：内核要在"任意任务视角"下清零并
+     * 遍历它；普通分配器的高区帧在用户页目录里不可见（本 bug 曾让
+     * 子进程页目录变成散落零页，CR3 一换即死——S3 纯属地理 luck） */
+    uint32_t pd_pa = pmm_alloc_frame_low();
     uint32_t *pd = (uint32_t *)pd_pa;
     memset(pd, 0, 4096);
     /* 内核区整表继承自 boot_pd，但【跳过用户窗口的 PDE1-4】——
@@ -126,7 +129,7 @@ uint32_t page_va2pa(uint32_t *pd, uint32_t va) {
 
 /* ---------- 启动与缺页 ---------- */
 void paging_init(void) {
-    boot_pd = (uint32_t *)pmm_alloc_frame_low();   /* PDE0 内、全任务可见 */
+    boot_pd = (uint32_t *)pmm_alloc_frame();
     memset(boot_pd, 0, 4096);
     /* 全部 128MiB 恒等映射、一律 supervisor——这是"内核视角"的页目录：
      * 用户页（US=1）只存在于各任务自己的页目录里。
@@ -168,6 +171,7 @@ void page_fault_handler(uint32_t err, uint32_t va) {
         }
     }
     if (!(err & 1) && va >= USER_BASE && va < USER_BASE + USER_SPAN) {
+        /* 按需零页：bss/栈的延迟就位（M3 在此之前插 COW 判定） */
         uint32_t pa = pmm_alloc_frame_low();
         if (!pa) goto panic;
         memset((void *)pa, 0, 4096);

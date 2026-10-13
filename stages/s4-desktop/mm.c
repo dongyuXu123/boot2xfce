@@ -51,48 +51,36 @@ void pmm_init(struct mb_info *mb) {
      * 扫起会把 0x0 当可分配页，此 bug 由课程的 alloc/free 断言揪出）
      * + 内核映像 / 堆 / 用户区（代码+栈） */
     reserve_range(0, 0x100000u);
-    reserve_range(0x100000u, (uint32_t)(uintptr_t)kernel_end);   /* 内核镜像 */
-    reserve_range(0x200000u, 0x400000u);   /* 堆（pmm 不得染指） */
-    reserve_range(USER_BASE, USER_BASE + 0x100000u);   /* 用户区 */
-    /* 低区池 [0x120000,0x200000) 不 reserve：由 pmm_alloc_frame_low 专用，
-     * 普通分配器按边界跳过。
-     * （保留区清单曾漏掉堆：普通分配器第一帧落在堆头上，boot_pd 与
-     *   heap 空闲链互相覆盖——全场诡异现象的 total 根因） */
+    reserve_range(0x100000u, (uint32_t)(uintptr_t)kernel_end);
+    reserve_range(HEAP_START, HEAP_END);
+    reserve_range(USER_BASE, USER_BASE + 0x100000u);
 }
 
 uint32_t pmm_total_frames(void) { return pmm_total; }
 
-/* 低区分配：只在 [0x180000, 0x200000)（堆之上、PDE0 覆盖内）找帧。
- * 凡"内核要先清零、再映进任务地址空间"的帧（页表/按需页/COW 副本/
- * ELF 段）都必须走这里——4MiB 以下被所有页目录继承，内核在任意任务
- * 视角都摸得到；高区帧在用户页目录视角是盲区。
- * 池约 220 帧，教学规模够用；耗尽打印并返回 0（绝不静默回退高区）。 */
-uint32_t low_hint;
+/* 低区分配：只在 [kernel_end, 4MiB) 内找帧。凡"内核要先清零、再映进
+ * 任务地址空间"的帧（页表/按需页/COW 副本/ELF 段）都必须走这里——
+ * 4MiB 以下属于 PDE0，被所有页目录继承，内核在任意任务视角都能摸到。
+ * （教训：S4 影子缓冲把空闲帧推过 4MiB 后，fork 的页表帧落进用户
+ *   PDE1 视角盲区，内核 memset 直接缺页。）
+ * 代价：低区只有 ~900KB（约 220 帧），教学规模够用。 */
+uint32_t low_hint = 0;
 uint32_t pmm_alloc_frame_low(void) {
-    if (!low_hint) low_hint = 0x120000u / 4096u;
+    if (!low_hint) low_hint = ((uint32_t)(uintptr_t)kernel_end + 4095) / 4096u;
     for (uint32_t f = low_hint; f < 0x200000u / 4096u; f++)
         if (!bm_get(f)) { bm_set(f); low_hint = f + 1; return f * 4096u; }
-    print("S4: LOW FRAMES EXHAUSTED\n");
-    return 0;
+    return pmm_alloc_frame();            /* 低区耗尽：退回普通分配（内核视角用） */
 }
 
 uint32_t pmm_alloc_frame(void) {
-    for (uint32_t f = pmm_hint; f < pmm_total; f++) {
-        if (f >= 0x120000u / 4096u && f < 0x200000u / 4096u) continue;  /* 低区池专用 */
+    for (uint32_t f = pmm_hint; f < pmm_total; f++)
         if (!bm_get(f)) { bm_set(f); pmm_hint = f + 1; return f * 4096u; }
-    }
-    return 0;
+    return 0;                                      /* 没了 */
 }
 
-extern uint32_t low_hint;
 void pmm_free_frame(uint32_t addr) {
     uint32_t f = addr / 4096;
-    if (f < pmm_total) {
-        pmm_bm[f >> 3] &= (uint8_t)~(1u << (f & 7));
-        pmm_hint = f;
-        if (f >= 0x120000u / 4096u && f < 0x200000u / 4096u && f < low_hint)
-            low_hint = f;                 /* 低区帧回收：把扫描提示拉回去 */
-    }
+    if (f < pmm_total) { pmm_bm[f >> 3] &= (uint8_t)~(1u << (f & 7)); pmm_hint = f; }
 }
 
 /* ---------- 堆：块头 12B，首次适应，kfree 向后合并 ---------- */

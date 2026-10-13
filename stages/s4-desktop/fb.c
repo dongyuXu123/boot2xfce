@@ -1,9 +1,7 @@
-/* fb.c —— S4：VBE/Dispi 线性帧缓冲 + 影子双缓冲
- * 模式经 0x1CE/0x1CF 设置（数据口 16 位，8 位分写 Bochs 不认）。
- * LFB 基址：PCI 探测 std VGA(bus0/dev2) BAR0，兜底 0xFD000000。
- * 图元全部画进影子缓冲（kernel.ld 钉在物理 0x600000 的普通 RAM，
- * 全任务可见），fb_blit 一次性拷到真 LFB——验收时 pmemsave 转储
- * 影子地址即可（MMIO 区无法 pmemsave）。
+/* fb.c —— S4：VBE/Dispi 线性帧缓冲（32bpp，直写 LFB）
+ * 模式经 0x1CE/0x1CF 设置（数据口 16 位）。LFB 基址：PCI 探测
+ * std VGA(bus0/dev2) BAR0，兜底 0xFD000000。LFB 映进 boot_pd
+ * （恒等别名），由 gfx 内核任务独占绘制。
  */
 #include "kernel.h"
 #include "font8x8.h"
@@ -63,8 +61,6 @@ void fb_init(void) {
 
     print("S4: LFB 640x480x32 @");
     print_hex(fb_addr);
-    print(" dispi_id=");
-    print_hex(dispi_get(DISPI_ID));
     print("\n");
 }
 
@@ -77,9 +73,8 @@ void fb_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t rgb) {
         for (uint32_t i = 0; i < w; i++)
             fb_pixel(x + i, y + j, rgb);
 }
-void fb_blit(void) { }   /* 直写 LFB，无影子可拷（接口保留） */
+void fb_blit(void) { }   /* 直写 LFB；接口为将来双缓冲保留 */
 
-/* 8x8 字体放大 1 倍绘制（font8x8, public domain） */
 void fb_char(uint32_t x, uint32_t y, char c, uint32_t rgb) {
     const unsigned char *g = font8x8_basic[(int)c & 0x7F];
     for (int j = 0; j < 8; j++)

@@ -1,8 +1,7 @@
-/* win.c —— S4：极简窗口系统 + 键盘驱动的桌面演示
- * 桌面背景 + 任务栏 + 窗口（标题栏/装饰条/内容文字/焦点边框）。
- * 键盘：Tab 切焦点、a/d 移动、n 开新窗。进入方式：shell 输 `gfx`
- * （SYS 17）→ gfx_on 置位 → gfx 内核任务接管屏幕与键盘。
- * 全部绘制进影子缓冲，fb_blit 上屏。
+/* win.c —— S4：极简窗口系统 + 键盘驱动桌面演示
+ * 桌面+任务栏+窗口（标题栏/装饰条/内容/焦点边框）。
+ * 键盘：Tab 切焦点、a/d 移动、n 开新窗。
+ * 进入：shell 输 gfx（SYS 17）→ gfx 内核任务接管屏幕与键盘。
  */
 #include "kernel.h"
 
@@ -70,8 +69,7 @@ static void win_body(int idx, int line, const char *s) {
 }
 
 void gfx_start(void) {
-    /* 只置位：fb_init/绘制由 gfx 内核任务执行（它站在 boot_pd 上，
-     * 看得见 LFB 与影子缓冲；syscall 现场的用户页目录看不见） */
+    /* 只置位：fb_init/绘制由 gfx 内核任务执行 */
     gfx_on = 1;
 }
 
@@ -108,10 +106,10 @@ static void gfx_key(char c) {
         return;
     }
     draw_desktop();
+    fb_blit();
 }
 
 void gfx_task(void) {
-    static int fb_ready2 = 0;
     static uint32_t last_ticks = 0;
     for (;;) {
         if (!gfx_active()) { task_yield(); continue; }
@@ -130,6 +128,7 @@ void gfx_task(void) {
                 l2[i] = 0;
                 wins[1].body[1] = l2;
                 draw_desktop();
+                fb_blit();
             }
         }
         task_yield();

@@ -56,8 +56,7 @@ struct vnode *tty_lookup_vnode(void) {
 
 void tty_init(void) { line_len = 0; line_ready = 0; }
 
-/* 键盘软链：kbd 环形缓冲 → 行规程（在 IRQ1 分发里被调）。
- * gfx 模式下不喂——键盘整体归窗口系统。 */
+/* 键盘软链：kbd 环形缓冲 → 行规程（在 IRQ1 分发里被调） */
 void tty_poll(void) {
     if (gfx_active()) return;
     int c;

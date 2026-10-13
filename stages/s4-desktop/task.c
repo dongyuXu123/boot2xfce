@@ -122,7 +122,6 @@ task_t *task_clone(task_t *parent, struct regs *r) {
     t->ueip  = r->eip;
     t->uesp  = r->esp;
 
-
     t->pd = page_dir_create();
     page_copy_space(t->pd, parent->pd);
     return t;

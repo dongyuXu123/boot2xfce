@@ -59,16 +59,24 @@ build/sh_blob.o: sh_blob.asm build/sh.elf | $(B)
 
 test: $(B)/boot.iso
 	@rm -f $(B)/serial.log
-	@( sleep 10; for k in r u n spc h e l l o ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 5; printf 'quit\n' ) \
-		| timeout 30 $(QEMU) -cdrom $< -boot d -display none -no-reboot \
+	@( sleep 10; \
+	   for k in r u n spc h e l l o ret; do printf 'sendkey %s\n' $$k; sleep 0.3; done; sleep 2; \
+	   for r in 1 2 3; do for k in g f x ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 1; done; sleep 2; \
+	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb1.bin"\n'; sleep 1; \
+	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb2.bin"\n'; sleep 1; \
+	   printf 'pmemsave 0xfd000000 1228800 "$(abspath $(B))/fb3.bin"\n'; sleep 1; printf 'quit\n' ) \
+		| timeout 40 $(QEMU) -cdrom $< -boot d -display none -no-reboot -vga std \
 		-serial file:$(B)/serial.log -monitor stdio > /dev/null 2>&1 || true
+	@python3 ../../scripts/check-fb.py $(B)/fb1.bin $(B)/fb2.bin $(B)/fb3.bin
 	@ok=1; \
 	for m in "S4: GDT/IDT/PIC/PIT ready" "S4: pmm frames=" "S4: ramfs read-back OK" \
 	         "taskA run 1" "taskB run 1" "S4: kernel core ready" \
-	         "S4: demand page OK" "S4: per-task pd + ELF image OK" "[user] hello from ring3" "[child] fork=0, x=6" "[parent] child 5 reaped, x=5" "[hello] ELF exec OK" "S4: ramfs ls:" "[sh] shell ready" "[sh] child done"; do \
-		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s3 缺少标记: $$m"; ok=0; }; \
+	         "S4: demand page OK" "S4: per-task pd + ELF image OK" "[user] hello from ring3" \
+	         "[child] fork=0, x=6" "[parent] child 6 reaped, x=5" "[hello] ELF exec OK" \
+	         "S4: ramfs ls:" "[sh] shell ready" "[sh] child done" "S4: LFB 640x480x32"; do \
+		grep -qF "$$m" $(B)/serial.log || { echo "[FAIL] s4 缺少标记: $$m"; ok=0; }; \
 	done; \
-	[ $$ok = 1 ] && echo "[PASS] s3" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }
+	[ $$ok = 1 ] && echo "[PASS] s4" || { echo "---- 串口输出 ----"; cat $(B)/serial.log; exit 1; }
 
 $(B)/boot.iso: $(B)/kernel.elf iso/boot/grub/grub.cfg
 	rm -rf $(B)/iso && mkdir -p $(B)/iso/boot/grub

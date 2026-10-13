@@ -4,7 +4,7 @@
  */
 #include "kernel.h"
 
-struct mb_info *g_mb;                /* fb.c 取 LFB 基址用 */
+struct mb_info *g_mb;
 
 void kmain(uint32_t magic, struct mb_info *mb) {
     console_init();
