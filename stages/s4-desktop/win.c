@@ -137,10 +137,10 @@ static int win_new(const char *title, uint32_t pid, int is_tty) {
         wins[i].pid = pid;
         wins[i].is_tty = is_tty;
         for (int j = 0; j < 23 && title[j]; j++) wins[i].title[j] = title[j];
-        wins[i].x = 60 + (i % 3) * 180;
-        wins[i].y = 50 + (i / 3) * 130;
-        wins[i].w = 368;
-        wins[i].h = 200;
+        wins[i].x = 30 + (i % 2) * 90;
+        wins[i].y = 24 + (i / 2) * 60;
+        wins[i].w = 560;
+        wins[i].h = 400;
         focus = i;
         print("[win] "); print(title); print("\n");
         return i;
