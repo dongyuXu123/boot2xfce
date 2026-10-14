@@ -152,6 +152,7 @@ uint32_t *page_kernel_pd(void) {
 
 /* 缺页：err bit0=present bit1=write bit2=user */
 void page_fault_handler(uint32_t err, uint32_t va) {
+
     /* COW 写拷贝：写一个"在场但只读+COW"的用户页 */
     if ((err & 1) && (err & 2) && va >= USER_BASE && va < USER_BASE + USER_SPAN) {
         uint32_t *pte = walk(active_pd, va, 0);
