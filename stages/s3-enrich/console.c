@@ -201,7 +201,7 @@ static void vc_putc(char c) {
     }
     switch (c) {
     case 27:  vc.state = ESesc; return;          /* ESC */
-    case '\n': lf(); return;
+    case '\n': cr(); lf(); return;   /* ONLCR：n_tty.c 同款，LF→CR+LF */
     case '\r': cr(); return;
     case '\b': bs(); return;
     case '\t': {                                 /* 制表：到 8 的倍数（vt.c tab 位图语义） */

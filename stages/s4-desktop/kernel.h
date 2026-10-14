@@ -182,6 +182,7 @@ void gfx_task(void);
 int  gfx_active(void);
 int  gfx_spawn_window(uint32_t pid, const char *title);
 void gfx_on_exit(uint32_t pid);
+void gfx_clear_focused(void);
 int  tty_read_window(uint32_t pid, char *out, int max);
 void tty_write_window(uint32_t pid, const char *s);
 void gfx_console_write(uint32_t pid, const char *s, uint32_t n);

@@ -140,6 +140,15 @@ void syscall_dispatch(struct regs *r) {
     case 23:                                    /* time()：HHMMSS */
         r->eax = rtc_time();
         break;
+    case 24:                                    /* clear_screen：文本台清屏或清聚焦窗 */
+        if (gfx_active()) {
+            extern void gfx_clear_focused(void);
+            gfx_clear_focused();
+        } else {
+            console_clear();
+        }
+        r->eax = 0;
+        break;
     case 17:                                    /* gfx：进入图形演示 */
         gfx_start();
         r->eax = 0;

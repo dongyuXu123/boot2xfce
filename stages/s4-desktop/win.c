@@ -193,6 +193,16 @@ int tty_read_global(char *out, int max) {
 int win_by_pid_ok(uint32_t pid) {
     return win_by_pid(pid) != 0;
 }
+void gfx_clear_focused(void) {
+    struct win *w = win_by_pid(current->pid);
+    if (!w) return;
+    memset(w->lines, 0, sizeof(w->lines));
+    w->top = 0; w->nl = 0;
+    memset(w->input, 0, sizeof(w->input));
+    w->ilen = 0;
+    gfx_dirty = 1;
+}
+
 void gfx_console_write(uint32_t pid, const char *s, uint32_t n) {
     struct win *w = win_by_pid(pid);
     if (!w) return;
