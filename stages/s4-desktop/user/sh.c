@@ -16,7 +16,9 @@ void user_main(void) {
         if (n <= 0) continue;
         if (line[n - 1] == '\n') line[n - 1] = 0; else line[n] = 0;
         if (line[0] == 0) continue;
-        if (streq(line, "help")) {
+        if (streq(line, "clear")) {
+            sys(24, 0, 0, 0);                    /* 清当前窗口 */
+        } else if (streq(line, "help")) {
             uprint("cmds: ls [p] cd p mkdir p rm p pwd cat f run hello echo s gfx help\n");
         } else if (streq(line, "pwd")) {
             char b[128];

@@ -87,7 +87,6 @@ void isr_dispatch(struct regs *r) {
         fault_dump(r);                  /* CPU 异常：教学内核直接停机 */
     } else if (r->int_no == 32) {       /* IRQ0 时钟 */
         ticks++;
-        { static int c = 0; if (c++ < 400 && ticks % 50 == 0) print("[t]"); }
         outb(0x20, 0x20);               /* 先 EOI 再调度：切换后本栈的 iret 不依赖 PIC */
         schedule();
     } else if (r->int_no == 33) {       /* IRQ1 键盘 */
