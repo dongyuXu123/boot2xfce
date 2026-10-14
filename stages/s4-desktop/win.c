@@ -38,6 +38,7 @@ struct win {
 static struct win wins[MAX_WIN];
 static int focus = 0;
 static int gfx_on = 0;
+static int gfx_dirty = 1;
 
 int gfx_active(void) { return gfx_on; }
 
@@ -189,6 +190,19 @@ int tty_read_global(char *out, int max) {
     legacy.len = 0; legacy.ready = 0;
     return n;
 }
+int win_by_pid_ok(uint32_t pid) {
+    return win_by_pid(pid) != 0;
+}
+void gfx_console_write(uint32_t pid, const char *s, uint32_t n) {
+    struct win *w = win_by_pid(pid);
+    if (!w) return;
+    char tmp[256];
+    uint32_t k = n < 255 ? n : 255;
+    memcpy(tmp, s, k); tmp[k] = 0;
+    win_puts((int)(w - wins), tmp);
+    gfx_dirty = 1;
+}
+
 void tty_write_window(uint32_t pid, const char *s) { /* shell 输出进窗 */
     struct win *w = win_by_pid(pid);
     if (w) win_puts((int)(w - wins), s);

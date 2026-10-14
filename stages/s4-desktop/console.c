@@ -235,13 +235,23 @@ void *memcpy(void *d, const void *s, uint32_t n) {
 }
 
 /* ---------- 对外接口 ---------- */
-void console_write(const char *s, uint32_t n) {  /* print() 的落点：VGA + 串口双路 */
+void console_write(const char *s, uint32_t n) {  /* print() 的落点 */
+    {   /* gfx 模式：当前任务若有窗口，输出进窗口（vt 不可见） */
+        extern int gfx_active(void);
+        extern void gfx_console_write(uint32_t, const char *, uint32_t);
+        extern task_t *current;
+        if (gfx_active() && current && win_by_pid_ok(current->pid)) {
+            gfx_console_write(current->pid, s, n);
+            return;
+        }
+    }
     for (uint32_t i = 0; i < n; i++) {
         vc_putc(s[i]);
         serial_putc(s[i]);
     }
     set_cursor();
 }
+int win_by_pid_ok(uint32_t pid);                 /* win.c：有无属主窗口 */
 void console_init(void) {
     serial_init();
     cursor_shape();                              /* 硬件光标：下划线样式、自动闪烁 */
