@@ -225,7 +225,8 @@ void tasks_init(void);
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 uint32_t task_wait_scan(uint32_t pid);
-int  task_spawn(const char *path, uint32_t ppid, const char *title);                /* 收尸一个死子，返回其 pid */
+int  task_spawn(const char *path, uint32_t ppid, const char *title);
+void task_reap_orphans(void);                /* 收尸一个死子，返回其 pid */
 int  task_exec_image(task_t *t, const char *name);    /* ELF 换像（M4） */
 void schedule(void);                    /* 时间片轮转（须在关中断下调用） */
 void sched_loop(void) __attribute__((noreturn));

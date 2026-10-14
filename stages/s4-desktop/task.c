@@ -218,6 +218,17 @@ void task_b(void) {
     }
 }
 
+/* 孤儿回收：无人 wait 的死任务（spawn 的 shell 等）在此收尸 */
+void task_reap_orphans(void) {
+    for (int i = 0; i < MAX_TASKS; i++) {
+        task_t *t = &tasks[i];
+        if (t->state != T_DEAD || t->ppid != 0) continue;
+        if (t->kstack) kfree(t->kstack);
+        if (t->pd) page_dir_destroy(t->pd);
+        memset(t, 0, sizeof(*t));
+    }
+}
+
 void kbd_task(void) {                   /* 有键回显（无头测试时静默） */
     for (;;) {
         { extern int gfx_active(void); if (gfx_active()) { task_yield(); continue; } }
