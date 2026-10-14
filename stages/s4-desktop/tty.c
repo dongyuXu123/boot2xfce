@@ -26,6 +26,10 @@ void tty_feed(char c) {
 
 static int tty_read_impl(struct vnode *v, void *buf, uint32_t len, uint32_t off) {
     (void)v; (void)off;
+    /* gfx 桌面：shell 的 stdin 改走本窗口行规程（win.c wt[]）。
+     * 旧全局行规程在 gfx 下必须停用——否则读者与 gfx_task 抢 kbd_pop，
+     * 且这里等的 line_ready 在 gfx 下永远不会被置位（回车"失灵"）。 */
+    if (gfx_active()) return tty_read_window(current->pid, (char *)buf, (int)len);
     /* 阻塞：行没攒好就让出 CPU（无睡眠队列的教学实现） */
     while (!line_ready) {
         int c = kbd_pop();

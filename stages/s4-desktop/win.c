@@ -86,13 +86,7 @@ static void draw_window(int i) {
     }
 }
 static void draw_desktop(void) {
-    { extern volatile uint32_t ticks; print_dec(ticks); print("]");
-      uint32_t t0 = ticks;
-    fb_rect(0, 0, 100, 100, C_DESKTOP);            /* 小块试填充 */
-    print("[100x100 t=");
-    { extern volatile uint32_t ticks; print_dec(ticks); }
-    print(" t0="); print_dec(t0); print("]"); }
-      fb_rect(0, 0, fb_w, fb_h, C_DESKTOP);
+    fb_rect(0, 0, fb_w, fb_h, C_DESKTOP);
     fb_rect(0, fb_h - 28, fb_w, 28, C_TASKBAR);
     fb_rect(6, fb_h - 24, 90, 18, C_START);
     fb_text(14, fb_h - 20, "boot2xfce", 0x111111);
@@ -152,20 +146,28 @@ static void win_puts(int i, const char *s) {         /* 追加内容行（\n 分
             if (w->nl < WIN_ROWS) w->nl++; else w->top = (w->top + 1) % WIN_ROWS;
             memset(w->input, 0, WIN_COLS);
             w->ilen = 0;
-            if (*s != '\\n') w->input[w->ilen++] = *s;
+            if (*s != '\n') w->input[w->ilen++] = *s;
         } else w->input[w->ilen++] = *s;
     }
 }
 
-/* ---------- 应用/任务联动（sys 22 spawn / 窗口跟随） ---------- */
+/* ---------- 应用/任务联动（sys 22 spawn / 窗口跟随） ----------
+ * 绘制纪律：帧缓冲只允许 gfx_task 单线程绘制（IRQ0 抢占下，spawn/execve
+ * 的系统调用上下文若直接 draw_desktop 会与 gfx_task 的重绘交错出撕裂帧）。
+ * 其他上下文只在 cli 临界区里改 wins[] 并置 gfx_dirty。 */
 int gfx_spawn_window(uint32_t pid, const char *title) {
+    cli();
     int i = win_new(title, pid, 1);
-    draw_desktop();
+    gfx_dirty = 1;
+    sti();
     return i;
 }
 void gfx_on_exit(uint32_t pid) {                     /* 任务退出关窗 */
+    cli();
     for (int i = 0; i < MAX_WIN; i++)
         if (wins[i].used && wins[i].pid == pid) { wins[i].used = 0; }
+    gfx_dirty = 1;
+    sti();
 }
 
 /* ---------- tty 联动（tty.c 调用） ---------- */
@@ -174,8 +176,8 @@ static struct wtty legacy;                           /* gfx 前的全局输入 *
 static int legacy_on = 1;
 
 void tty_feed_global(char c) {                       /* gfx 前的键入 */
-    if (c == '\\n' || (legacy.len && legacy.len < 119)) {
-        if (c != '\\n') legacy.line[legacy.len++] = c;
+    if (c == '\n' || (legacy.len && legacy.len < 119)) {
+        if (c != '\n') legacy.line[legacy.len++] = c;
         legacy.ready = 1;
     }
 }
@@ -220,11 +222,10 @@ static struct wtty *focus_wt(void) {
     return &wt[focus];
 }
 void gfx_key_feed(char c) {
-    print("[kf]");
     struct wtty *t = focus_wt();
-    if (!t) { print("[no-wt]"); return; }
-    if (c == '\\b') { if (t->len) { t->len--; struct win *w = &wins[focus]; if (w->ilen) { w->ilen--; w->input[w->ilen] = 0; } } return; }
-    if (c == '\\n') { t->ready = 1; return; }
+    if (!t) return;
+    if (c == '\b') { if (t->len) { t->len--; struct win *w = &wins[focus]; if (w->ilen) { w->ilen--; w->input[w->ilen] = 0; } } return; }
+    if (c == '\n') { t->ready = 1; return; }
     if (t->len < 118) {
         t->line[t->len++] = c;
         struct win *w = &wins[focus];
@@ -242,7 +243,7 @@ int tty_read_window(uint32_t pid, char *out, int max) {
             memcpy(out, t->line, n); out[n] = 0;
             t->len = 0; t->ready = 0;
             /* 输入行进内容区 */
-            win_puts((int)(w - wins), "\\n");
+            win_puts((int)(w - wins), "\n");
             return n;
         }
         schedule();
@@ -251,11 +252,14 @@ int tty_read_window(uint32_t pid, char *out, int max) {
 
 /* ---------- 启动/事件 ---------- */
 void gfx_start(void) {
-    gfx_on = 1;
     legacy_on = 0;
-    /* 给现有 shell 任务挂窗口（键盘与输出随之进窗） */
+    /* 先建窗再放行：gfx_task 首绘时窗口必须已在，免得等到首个键鼠事件才出现 */
     extern task_t *current;
-    if (win_new("shell", current->pid, 1) >= 0) { }
+    cli();
+    win_new("shell", current->pid, 1);
+    gfx_dirty = 1;
+    sti();
+    gfx_on = 1;
 }
 
 static int spawn_shell(void) {
@@ -277,18 +281,14 @@ void gfx_task(void) {
             fb_ready = 1;
             task_yield(); continue;
         }
-        /* 鼠标事件 */
+        /* 鼠标事件：攒一批，末尾统一重绘 */
+        int moved = 0;
         while (mouse_pop(&btn, &dx, &dy)) {
-            { static int d = 0; if (d++ < 30) { print("[m b="); print_dec(btn);
-              print(" to="); print_dec((uint32_t)(cur_x + dx)); print(","); print_dec((uint32_t)(cur_y - dy));
-              print("]"); } }
-            { static int d = 0; if (d++ < 40) { print("[m]"); print_dec((uint32_t)btn); print(","); print_dec((uint32_t)(dx < 0 ? -dx : dx)); print(","); print_dec((uint32_t)(dy < 0 ? -dy : dy)); print("]"); } }
             cursor_erase();
             cur_x += dx; cur_y -= dy;
             if (cur_x < 0) cur_x = 0; if (cur_x > (int)fb_w - 9) cur_x = (int)fb_w - 9;
             if (cur_y < 0) cur_y = 0; if (cur_y > (int)fb_h - 13) cur_y = (int)fb_h - 13;
             if (btn & 1) {
-                print("[click]");
                 for (int i = MAX_WIN - 1; i >= 0; i--) {
                     struct win *w = &wins[i];
                     if (!w->used) continue;
@@ -298,20 +298,28 @@ void gfx_task(void) {
                         break;
                     }
                 }
-                draw_desktop();
             }
-            cursor_draw();
+            moved = 1;
         }
-        /* 键盘 */
-        int c;
+        if (moved) { draw_desktop(); cursor_draw(); }
+        /* 键盘事件 */
+        int c, keyed = 0;
         while ((c = kbd_pop()) >= 0) {
             if (c == 27) {                       /* ESC：新 shell 窗口 */
                 int pid = spawn_shell();
-                if (pid) { gfx_spawn_window((uint32_t)pid, "shell"); draw_desktop(); }
+                if (pid) gfx_spawn_window((uint32_t)pid, "shell");
+                keyed = 1;
                 continue;
             }
-            if (c == '\\n' || (c >= 32 && c < 127) || c == 8) gfx_key_feed((char)c);
+            if (c == '\n' || (c >= 32 && c < 127) || c == 8) gfx_key_feed((char)c);
+            keyed = 1;
+        }
+        /* 输出驱动刷新：shell/应用经 gfx_console_write 置脏，
+         * 无键鼠事件时也要重绘（否则窗口内容"不刷新"） */
+        if (keyed || gfx_dirty) {
             draw_desktop();
+            if (cur_on) cursor_draw();
+            gfx_dirty = 0;
         }
         task_yield();
     }

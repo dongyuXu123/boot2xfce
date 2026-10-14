@@ -196,7 +196,11 @@ void tty_feed(char c);
 void tty_poll(void);
 
 /* ---------- task.c ---------- */
-typedef enum { T_EMPTY, T_READY, T_RUNNING, T_DEAD } tstate_t;
+/* T_EMBRYO：构造期状态——内核栈/页目录/iret 帧还没就位的任务对调度器
+ * 必须不可见。IRQ0 的 schedule() 是抢占点：曾因创建即 T_READY，半成品
+ * 任务被 tick 调度，蹦床从 kmalloc 回收内存里弹垃圾 iret 帧 → 用户态
+ * 取指内核地址（PAGE FAULT err=5，偶发）。spawn/fork 构造完才转 READY。 */
+typedef enum { T_EMPTY, T_EMBRYO, T_READY, T_RUNNING, T_DEAD } tstate_t;
 
 /* switch_to 保存的内核上下文（与 cpu.asm 压栈顺序严格对应：
  * push ebx,esi,edi,ebp 后 ebp 位于最低地址，ret 取 eip） */

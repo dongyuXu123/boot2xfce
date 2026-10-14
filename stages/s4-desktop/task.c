@@ -49,7 +49,7 @@ task_t *task_create(void (*entry)(void), int is_user) {
         task_t *t = &tasks[i];
         memset(t, 0, sizeof(*t));
         t->pid        = next_pid++;
-        t->state      = T_READY;
+        t->state      = T_EMBRYO;      /* 构造完才 READY（见 kernel.h 注释） */
         t->entry      = entry;
         t->is_user    = is_user;
         t->kstack     = kmalloc(4096);
@@ -78,6 +78,9 @@ task_t *task_create(void (*entry)(void), int is_user) {
             frame[3] = t->uesp;         /* esp（用户栈顶） */
             frame[4] = 0x23;            /* ss（用户数据） */
             ctx->ebx = (uint32_t)(uintptr_t)frame;
+        } else {
+            /* 内核任务：入口/栈/上下文在此已齐备，可立即被调度 */
+            t->state = T_READY;
         }
         return t;
     }
@@ -94,7 +97,7 @@ task_t *task_clone(task_t *parent, struct regs *r) {
     memset(t, 0, sizeof(*t));
     t->pid        = next_pid++;
     t->ppid       = parent->pid;
-    t->state      = T_READY;
+    t->state      = T_EMBRYO;      /* fork 同样构造完才 READY */
     t->is_user    = 1;
     t->kstack     = kmalloc(4096);
     if (!t->kstack) return 0;
@@ -124,6 +127,7 @@ task_t *task_clone(task_t *parent, struct regs *r) {
 
     t->pd = page_dir_create();
     page_copy_space(t->pd, parent->pd);
+    t->state = T_READY;                /* COW 地址空间与现场就绪，放行 */
     return t;
 }
 
@@ -139,6 +143,7 @@ int task_spawn(const char *path, uint32_t ppid, const char *title) {
     }
     extern int gfx_spawn_window(uint32_t pid, const char *title);
     if (gfx_active()) gfx_spawn_window((uint32_t)t->pid, title);
+    t->state = T_READY;                /* 镜像与窗口全就绪才放行（防半成品被抢占调度） */
     return (int)t->pid;
 }
 

@@ -77,9 +77,10 @@ void kmain(uint32_t magic, struct mb_info *mb) {
     task_create(gfx_task, 0);
     {
         task_t *u = task_create(NULL, 1);
-        if (task_exec_image(u, "/bin/init") == 0)
+        if (task_exec_image(u, "/bin/init") == 0) {
+            u->state = T_READY;            /* 镜像就绪放行（T_EMBRYO 规则） */
             print("S4: per-task pd + ELF image OK\n");
-        else {
+        } else {
             print("S3: exec image BROKEN\n");
             for (;;) hlt();
         }

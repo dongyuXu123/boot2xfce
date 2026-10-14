@@ -30,11 +30,16 @@ static inline void outd(uint16_t port, uint32_t v) {
 static inline uint32_t ind(uint16_t port) {
     uint32_t r; __asm__ volatile("in %1,%0" : "=a"(r) : "Nd"(port)); return r;
 }
+/* 索引/数据两口都只登记了 16 位访问（QEMU hw/display/vga.c
+ * vbe_portio_list_x86：{0,1,2,...}{1,1,2,...}，size=2）。索引用 outb 写
+ * 会被 QEMU 静默丢弃，vbe_index 恒为 0（只读 ID），模式切换整体失效——
+ * 表现为显存内容正确（pmemsave 可验）但屏幕仍停留文本模式。Linux 的
+ * bochs 驱动（drivers/gpu/drm/tiny/bochs.c）同样以 outw 写索引。 */
 static void dispi_set(uint16_t idx, uint16_t val) {
-    outb(DISPI_INDEX, idx); outw(DISPI_DATA, val);
+    outw(DISPI_INDEX, idx); outw(DISPI_DATA, val);
 }
 static uint16_t dispi_get(uint16_t idx) {
-    outb(DISPI_INDEX, idx); return inw(DISPI_DATA);
+    outw(DISPI_INDEX, idx); return inw(DISPI_DATA);
 }
 static uint32_t pci_read(uint32_t bus, uint32_t dev, uint32_t fn, uint32_t reg) {
     outd(0xCF8, 0x80000000u | (bus << 16) | (dev << 11) | (fn << 8) | (reg & 0xFC));

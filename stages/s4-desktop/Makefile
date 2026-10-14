@@ -84,23 +84,7 @@ build/notepad_blob.o: notepad_blob.asm build/notepad.elf | $(B)
 	$(NASM) $(ASFLAGS) $< -o $@
 
 test: $(B)/boot.iso
-	@rm -f $(B)/serial.log
-	@rm -f $(B)/wait.flag
-	@( sleep 8; \
-	   for r in 1 2 3; do for k in g f x ret; do printf 'sendkey %s\n' $$k; sleep 0.4; done; sleep 1; done; \
-	   for k in c a l c ret; do printf 'sendkey %s\n' $$k; sleep 0.5; done; sleep 2; \
-	   for k in 2 shift-equal 3 ret; do printf 'sendkey %s\n' $$k; sleep 0.5; done; sleep 2; \
-	   for r in 1 2 3; do printf 'sendkey esc\n'; sleep 1.2; done; \
-	   for k in e c h o spc h i ret; do printf 'sendkey %s\n' $$k; sleep 0.5; done; sleep 3; printf 'quit\n' ) \
-		| timeout 50 $(QEMU) -cdrom $< -boot d -display none -no-reboot -vga std \
-		-serial file:$(B)/serial.log -monitor stdio > /dev/null 2>&1 || true
-	@python3 ../../scripts/check-fb.py $(B)/fb1.bin $(B)/fb2.bin $(B)/fb3.bin $(B)/fb4.bin
-	@for m in "S4: GDT/IDT/PIC/PIT ready" "S4: pmm frames=" "S4: ramfs read-back OK" \
-	         "S4: kernel core ready" "S4: demand page OK" "S4: per-task pd + ELF image OK" \
-	         "[user] hello from ring3" "S4: LFB 640x480x32" "[win] shell" "[click at"; do \
-		grep -qF "$$m" $(B)/serial.log || echo "[info] 标记未现(注入抖动): $$m"; \
-	done; \
-	[ -f $(B)/fb1.bin ] && echo "[PASS] s4"
+	@python3 ../../scripts/s4-test.py $(CURDIR)
 
 $(B)/boot.iso: $(B)/kernel.elf iso/boot/grub/grub.cfg
 	rm -rf $(B)/iso && mkdir -p $(B)/iso/boot/grub
