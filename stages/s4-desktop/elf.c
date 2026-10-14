@@ -49,7 +49,7 @@ static int elf_load_pd(uint32_t *pd, const uint8_t *img, uint32_t size, uint32_t
         if (ph->p_memsz == 0) continue;
         if (ph->p_type != PT_LOAD) continue;
         if (ph->p_vaddr < USER_BASE || ph->p_vaddr + ph->p_memsz > USER_BASE + USER_SPAN) {
-            print("[xr]"); return -1;
+            return -1;
         }
 
         /* 按页分配（清零：bss 就位）并映进 pd */
@@ -97,7 +97,6 @@ void page_dir_clear_user(uint32_t *pd) {
 int task_exec_image(task_t *t, const char *name) {
     static uint8_t img[16384];
     int n = ramfs_read(name, img, sizeof(img));
-    print("[xi n="); print_dec((uint32_t)(n < 0 ? 0 : n)); print("]");
     if (n <= 0) return -1;
 
     page_dir_clear_user(t->pd);

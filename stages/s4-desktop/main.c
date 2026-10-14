@@ -70,8 +70,6 @@ void kmain(uint32_t magic, struct mb_info *mb) {
 
     /* ---- 进程：轮转任务 + 键盘 + ELF 方式启动的 init ---- */
     tasks_init();
-    task_create(task_a, 0);
-    task_create(task_b, 0);
     task_create(kbd_task, 0);
     task_create(gfx_task, 0);
     {

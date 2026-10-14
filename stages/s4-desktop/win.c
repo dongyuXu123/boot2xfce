@@ -86,16 +86,13 @@ static void draw_window(int i) {
     }
 }
 static void draw_desktop(void) {
-    print("[dd0 t=");
     { extern volatile uint32_t ticks; print_dec(ticks); print("]");
       uint32_t t0 = ticks;
     fb_rect(0, 0, 100, 100, C_DESKTOP);            /* 小块试填充 */
     print("[100x100 t=");
     { extern volatile uint32_t ticks; print_dec(ticks); }
     print(" t0="); print_dec(t0); print("]"); }
-    { extern volatile uint32_t ticks; uint32_t q = ticks;
       fb_rect(0, 0, fb_w, fb_h, C_DESKTOP);
-      print("[full t0="); print_dec(q); print(" t1="); print_dec(ticks); print("]\n"); }
     fb_rect(0, fb_h - 28, fb_w, 28, C_TASKBAR);
     fb_rect(6, fb_h - 24, 90, 18, C_START);
     fb_text(14, fb_h - 20, "boot2xfce", 0x111111);
@@ -142,7 +139,6 @@ static int win_new(const char *title, uint32_t pid, int is_tty) {
         wins[i].w = 560;
         wins[i].h = 400;
         focus = i;
-        print("[win] "); print(title); print("\n");
         return i;
     }
     return -1;
@@ -292,8 +288,6 @@ void gfx_task(void) {
             if (cur_x < 0) cur_x = 0; if (cur_x > (int)fb_w - 9) cur_x = (int)fb_w - 9;
             if (cur_y < 0) cur_y = 0; if (cur_y > (int)fb_h - 13) cur_y = (int)fb_h - 13;
             if (btn & 1) {
-                print("[click at "); print_dec((uint32_t)cur_x); print(","); print_dec((uint32_t)cur_y);
-                print(" -> focus "); print_dec((uint32_t)focus); print("]");
                 print("[click]");
                 for (int i = MAX_WIN - 1; i >= 0; i--) {
                     struct win *w = &wins[i];

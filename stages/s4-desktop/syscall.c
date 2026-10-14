@@ -71,7 +71,6 @@ void syscall_dispatch(struct regs *r) {
         }
         kname[15] = 0;
         int rc = task_exec_image(current, kname);
-        if (rc != 0) print("[exec fail rc="); print_dec((uint32_t)rc); print("]");
         if (rc == 0) {
             /* gfx 模式：为换像后的程序开自己的窗口（应用窗） */
             if (gfx_active()) {
