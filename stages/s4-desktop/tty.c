@@ -36,6 +36,7 @@ static int tty_read_impl(struct vnode *v, void *buf, uint32_t len, uint32_t off)
         if (c >= 32 && c < 127) tty_feed((char)c);
         else if (c == '\b') tty_feed((char)c);
         else if (c == '\n') tty_feed((char)'\n');
+        current->if_on = 0;             /* 此刻在 int80 门内：真实 IF=0 */
         schedule();
     }
     if (len > (uint32_t)line_len) len = (uint32_t)line_len;

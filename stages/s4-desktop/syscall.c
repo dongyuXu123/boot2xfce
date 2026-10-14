@@ -26,14 +26,25 @@ void syscall_dispatch(struct regs *r) {
     case 2:                                     /* getpid */
         r->eax = current->pid;
         break;
-    case 3:                                     /* exit */
+    case 3: {                                   /* exit */
         current->state = T_DEAD;
         gfx_on_exit(current->pid);
+        { extern void debug_ser(const char *);
+          extern void debug_hex(uint32_t);
+          debug_ser("[exit pid="); debug_hex(current->pid); debug_ser("]\n"); }
         print("S3: [user] exit, pid=");
         print_dec(current->pid);
         print("\n");
         r->eax = 0;
+        /* 必须立刻切走且永不返回：死任务的内核栈随时会被 reap 的
+         * kfree 收回，而 TSS esp0 还指着它——若死任务继续霸占 CPU
+         * （哪怕挂在用户态死循环），每个中断都往"已释放的栈"里压帧，
+         * 随机腐蚀新主人（context 弹出 eip=3、画布内容蒸发……）。
+         * （旧代码标完 DEAD 就 break 返回，靠用户桩 .hang 死循环侥幸。） */
+        schedule();
+        for (;;) hlt();
         break;
+    }
     case 4:                                     /* uptime */
         r->eax = ticks;
         break;
@@ -146,6 +157,36 @@ void syscall_dispatch(struct regs *r) {
         } else {
             console_clear();
         }
+        r->eax = 0;
+        break;
+    case 25:                                    /* wgfx()：本窗转画布模式 */
+        r->eax = (uint32_t)gfx_mode_on(current->pid);
+        break;
+    case 26: {                                  /* wrect(&{x,y,w,h,color}) */
+        static struct { int x, y, w2, h2; uint32_t color; } rc;
+        if (!uptr_ok(r->ebx, sizeof(rc))) { r->eax = (uint32_t)-1; break; }
+        memcpy(&rc, (void *)(uintptr_t)r->ebx, sizeof(rc));
+        r->eax = (uint32_t)gfx_rect(current->pid, rc.x, rc.y, rc.w2, rc.h2, rc.color);
+        break;
+    }
+    case 27: {                                  /* wtext(&{x,y,color,s[48]}) */
+        static struct { int x, y; uint32_t color; char s[48]; } tx;
+        if (!uptr_ok(r->ebx, sizeof(tx))) { r->eax = (uint32_t)-1; break; }
+        memcpy(&tx, (void *)(uintptr_t)r->ebx, sizeof(tx));
+        tx.s[47] = 0;
+        r->eax = (uint32_t)gfx_text(current->pid, tx.x, tx.y, tx.color, tx.s);
+        break;
+    }
+    case 28: {                                  /* wevent(&ev) → 1 有事件 */
+        if (!uptr_ok(r->ebx, sizeof(struct wmev))) { r->eax = (uint32_t)-1; break; }
+        struct wmev ev;
+        int got = gfx_ev_pop(current->pid, &ev);
+        if (got) memcpy((void *)(uintptr_t)r->ebx, &ev, sizeof(ev));
+        r->eax = (uint32_t)got;
+        break;
+    }
+    case 29:                                    /* wyield()：协作让出 */
+        task_yield();
         r->eax = 0;
         break;
     case 17:                                    /* gfx：进入图形演示 */

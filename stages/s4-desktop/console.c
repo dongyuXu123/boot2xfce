@@ -235,6 +235,15 @@ void *memcpy(void *d, const void *s, uint32_t n) {
 }
 
 /* ---------- 对外接口 ---------- */
+void debug_ser(const char *s) {          /* 直打串口（绕过 gfx 路由，诊断用） */
+    for (; *s; s++) serial_putc(*s);
+}
+void debug_hex(uint32_t v) {             /* 诊断用：16 进制直打串口 */
+    static const char h[] = "0123456789abcdef";
+    char b[11] = "0x";
+    for (int i = 0; i < 8; i++) b[2 + i] = h[(v >> ((7 - i) * 4)) & 0xF];
+    debug_ser(b);
+}
 void console_write(const char *s, uint32_t n) {  /* print() 的落点 */
     {   /* gfx 模式：当前任务若有窗口，输出进窗口（vt 不可见） */
         extern int gfx_active(void);

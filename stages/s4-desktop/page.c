@@ -39,13 +39,12 @@ uint32_t *page_dir_create(void) {
     uint32_t pd_pa = pmm_alloc_frame_low();
     uint32_t *pd = (uint32_t *)pd_pa;
     memset(pd, 0, 4096);
-    /* 内核区整表继承自 boot_pd，但【跳过用户窗口的 PDE1-4】——
-     * 那四项在任务里必须是任务自己的用户页表，绝不能带上内核的
-     * 恒等映射视图（否则用户态能看见别人的物理内存） */
-    for (uint32_t i = 0; i < 1024; i++) {
-        if (i >= PD_INDEX(USER_BASE) && i < PD_INDEX(USER_BASE + USER_SPAN)) continue;
-        pd[i] = boot_pd[i];
-    }
+    /* 内核区只继承 PDE0（低 4MiB：内核代码/堆/低区分配器的家）。
+     * 【绝不能】把 boot_pd 其余内核区（恒等映射/LFB/画布别名）共享
+     * 继承：那些页表是全局的，execve 的 clear_user 会把它们当任务
+     * 私产整张释放——boot_pd 的 fb/画布映射随之蒸发（S4 画布灵异
+     * 与 err=2 写 0xfd000000 的总根因）。用户任务本就不该看见它们。 */
+    pd[0] = boot_pd[0];
     return pd;
 }
 
@@ -67,7 +66,7 @@ void page_dir_destroy(uint32_t *pd) {
 /* fork 的地址空间复制：父的可写页转 COW 共享，子映射同一物理帧；
  * 本就只读的页（代码）直接共享。计数同步 +1。 */
 void page_copy_space(uint32_t *dst, uint32_t *src) {
-    for (uint32_t i = PD_INDEX(USER_BASE); i < 1024; i++) {
+    for (uint32_t i = PD_INDEX(USER_BASE); i < PD_INDEX(USER_BASE + USER_SPAN); i++) {
         if (!(src[i] & PG_P)) continue;
         uint32_t *spt = (uint32_t *)(src[i] & ~0xFFF);
         /* 子的页表也直接共享同一张（项级 COW 时再改）——共享页表必须

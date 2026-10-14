@@ -24,8 +24,29 @@
 #define WIN_COLS 46
 #define WIN_ROWS 18
 
+/* ---------- 图形窗口（canvas 模式） ----------
+ * 应用不直接碰帧缓冲：经 sys26/27 把绘制命令压进本窗命令环，
+ * gfx_task 单线程消费并画进画布；画布 = pmm 帧 + boot_pd 别名
+ * （GFX_VA 区，仅内核视角），draw_window 时整块 blit 上屏。
+ * 键鼠反向走事件环：聚焦的图形窗收 EV_KEY/EV_CLICK，应用 sys28 轮询。 */
+#define GFX_VA_BASE 0x06000000u      /* 每窗 1MiB 别名槽（boot_pd，supervisor） */
+#define GFX_SLOT    0x100000u
+#define OP_RECT     1
+#define OP_TEXT     2
+#define OP_LINE     3
+#define OP_CIRCLE   4
+struct drawop {
+    int op, x, y, w, h;
+    uint32_t color;
+    char s[48];
+};
+#define RING_N 128
+#define EVN 32
+
 struct win {
     int used, is_tty;
+    int is_gfx, canvas_ok;          /* canvas_ok：画布已清底、可 blit */
+    uint32_t canvas;                /* 画布别名基址（0=无） */
     uint32_t pid;               /* 属主任务（0=无属主的信息窗） */
     uint32_t x, y, w, h;
     char title[24];
@@ -36,9 +57,14 @@ struct win {
     int ilen;
 };
 static struct win wins[MAX_WIN];
+static struct drawop ring[MAX_WIN][RING_N];
+static volatile int rhead[MAX_WIN], rtail[MAX_WIN];
+static struct wmev evq[MAX_WIN][EVN];
+static volatile int ehead[MAX_WIN], etail[MAX_WIN];
 static int focus = 0;
 static int gfx_on = 0;
-static int gfx_dirty = 1;
+volatile unsigned gfx_passes, gfx_draws;   /* 诊断：gfx 调度/绘制计数 */
+static volatile unsigned gfx_gen = 1;   /* 内容代数：任何改动 ++，绘制方比较代数 */
 
 int gfx_active(void) { return gfx_on; }
 
@@ -46,6 +72,184 @@ static struct win *win_by_pid(uint32_t pid) {
     for (int i = 0; i < MAX_WIN; i++)
         if (wins[i].used && wins[i].pid == pid) return &wins[i];
     return 0;
+}
+
+/* ---------- 画布：分配 = pmm 帧 + boot_pd 别名（仅内核视角） ---------- */
+static void canvas_free(int i) {
+    struct win *w = &wins[i];
+    if (!w->canvas) return;
+    uint32_t va = w->canvas;
+    uint32_t n = (w->w * w->h * 4 + 4095) >> 12;
+    for (uint32_t k = 0; k < n; k++) {
+        uint32_t pa = page_va2pa(page_kernel_pd(), va + k * 4096u);
+        if (pa) { pmm_free_frame(pa); page_unmap(page_kernel_pd(), va + k * 4096u); }
+    }
+    w->canvas = 0; w->is_gfx = 0; w->canvas_ok = 0;
+}
+
+/* 应用侧（系统调用上下文）开图形模式：分配画布并别名进 boot_pd。
+ * 清底由 gfx_task 首帧做（本上下文的 CR3 是任务的，摸不到画布）。 */
+int gfx_mode_on(uint32_t pid) {
+    cli();
+    struct win *w = win_by_pid(pid);
+    if (!w) { sti(); return -1; }
+    if (!w->is_gfx) {
+        int i = (int)(w - wins);
+        uint32_t va = GFX_VA_BASE + (uint32_t)i * GFX_SLOT;
+        uint32_t n = (w->w * w->h * 4 + 4095) >> 12, bad = 0;
+        for (uint32_t k = 0; k < n && !bad; k++) {
+            uint32_t pa = pmm_alloc_frame();
+            if (!pa) bad = 1;
+            else page_map(page_kernel_pd(), va + k * 4096u, pa, 0, 1);
+        }
+        if (bad) { canvas_free(i); sti(); return -1; }
+        w->canvas = va;
+        w->is_gfx = 1;
+        w->canvas_ok = 0;
+        rhead[i] = rtail[i] = 0;
+        ehead[i] = etail[i] = 0;
+    }
+    gfx_gen++;
+    sti();
+    return 0;
+}
+
+/* 绘制命令：应用压入（生产者），gfx_task 消费（消费者） */
+static int ring_push(int i, const struct drawop *o) {
+    int ok = 0;
+    cli();
+    int nh = (rhead[i] + 1) % RING_N;
+    if (nh != rtail[i]) { ring[i][rhead[i]] = *o; rhead[i] = nh; ok = 1; }
+    gfx_gen++;
+    sti();
+    return ok;
+}
+int gfx_rect(uint32_t pid, int x, int y, int w2, int h2, uint32_t color) {
+    struct win *w = win_by_pid(pid);
+    if (!w || !w->is_gfx) return -1;
+    struct drawop o = { OP_RECT, x, y, w2, h2, color, {0} };
+    return ring_push((int)(w - wins), &o);
+}
+int gfx_text(uint32_t pid, int x, int y, uint32_t color, const char *s) {
+    struct win *w = win_by_pid(pid);
+    if (!w || !w->is_gfx) return -1;
+    struct drawop o = { OP_TEXT, x, y, 0, 0, color, {0} };
+    int k;
+    for (k = 0; k < 47 && s[k]; k++) o.s[k] = s[k];
+    o.s[k] = 0;
+    return ring_push((int)(w - wins), &o);
+}
+int gfx_line(uint32_t pid, int x0, int y0, int x1, int y1, uint32_t color) {
+    struct win *w = win_by_pid(pid);
+    if (!w || !w->is_gfx) return -1;
+    struct drawop o = { OP_LINE, x0, y0, x1, y1, color, {0} };
+    return ring_push((int)(w - wins), &o);
+}
+int gfx_circle(uint32_t pid, int cx, int cy, int r, uint32_t color) {
+    struct win *w = win_by_pid(pid);
+    if (!w || !w->is_gfx) return -1;
+    struct drawop o = { OP_CIRCLE, cx, cy, r, 0, color, {0} };
+    return ring_push((int)(w - wins), &o);
+}
+
+/* 事件：gfx_task 压入（聚焦图形窗的键/点击），应用 sys28 轮询弹出 */
+void gfx_ev_push(int i, int type, long a, long b) {
+    cli();
+    int nh = (ehead[i] + 1) % EVN;
+    if (nh != etail[i]) {
+        evq[i][ehead[i]].type = type;
+        evq[i][ehead[i]].a = a;
+        evq[i][ehead[i]].b = b;
+        ehead[i] = nh;
+    }
+    sti();
+}
+int gfx_ev_pop(uint32_t pid, struct wmev *out) {
+    struct win *w = win_by_pid(pid);
+    if (!w || !w->is_gfx) return 0;
+    int i = (int)(w - wins);
+    cli();
+    if (etail[i] == ehead[i]) { sti(); return 0; }
+    out->type = evq[i][etail[i]].type;
+    out->a = evq[i][etail[i]].a;
+    out->b = evq[i][etail[i]].b;
+    etail[i] = (etail[i] + 1) % EVN;
+    sti();
+    return 1;
+}
+
+/* gfx_task 侧：清底首帧 + 消费命令（单线程绘制纪律的图形窗半边） */
+static void cv_char(int i, int x, int y, char c, uint32_t rgb) {
+    struct win *w = &wins[i];
+    const unsigned char *g = font8x8_basic[(int)c & 0x7F];
+    uint32_t *cv = (uint32_t *)(uintptr_t)w->canvas;
+    for (int j = 0; j < 8; j++) {
+        int yy = y + j;
+        if (yy < 0 || yy >= (int)w->h) continue;
+        for (int k = 0; k < 8; k++) {
+            int xx = x + k;
+            if (xx >= 0 && xx < (int)w->w && (g[j] & (1u << k)))
+                cv[yy * w->w + xx] = rgb;
+        }
+    }
+}
+static void op_apply(int i, const struct drawop *o) {
+    struct win *w = &wins[i];
+    if (!w->canvas) return;
+    uint32_t *cv = (uint32_t *)(uintptr_t)w->canvas;
+    int W = (int)w->w, H = (int)w->h;
+    if (o->op == OP_RECT) {
+        int x0 = o->x < 0 ? 0 : o->x, y0 = o->y < 0 ? 0 : o->y;
+        int x1 = o->x + o->w > W ? W : o->x + o->w;
+        int y1 = o->y + o->h > H ? H : o->y + o->h;
+        for (int yy = y0; yy < y1; yy++)
+            for (int xx = x0; xx < x1; xx++) cv[yy * W + xx] = o->color;
+    } else if (o->op == OP_TEXT) {
+        for (int k = 0; k < 48 && o->s[k]; k++)
+            cv_char(i, o->x + k * 8, o->y, o->s[k], o->color);
+    } else if (o->op == OP_LINE) {
+        int dx = o->w - o->x, dy = o->h - o->y;      /* w,h 复用为终点 */
+        int sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+        int adx = dx > 0 ? dx : -dx, ady = dy > 0 ? dy : -dy;
+        int err = adx - ady, x = o->x, y = o->y;
+        for (;;) {
+            if (x >= 0 && x < W && y >= 0 && y < H) cv[y * W + x] = o->color;
+            if (x == o->w && y == o->h) break;
+            int e2 = err * 2;
+            if (e2 > -ady) { err -= ady; x += sx; }
+            if (e2 < adx)  { err += adx; y += sy; }
+        }
+    } else if (o->op == OP_CIRCLE) {
+        int cx = o->x, cy = o->y, r = o->w;          /* 中点圆（八分对称） */
+        int px = r, py = 0, err = 1 - r;
+        while (px >= py) {
+            int qx[8] = { cx + px, cx + py, cx - py, cx - px,
+                          cx - px, cx - py, cx + py, cx + px };
+            int qy[8] = { cy + py, cy + px, cy + px, cy + py,
+                          cy - py, cy - px, cy - px, cy - py };
+            for (int k = 0; k < 8; k++)
+                if (qx[k] >= 0 && qx[k] < W && qy[k] >= 0 && qy[k] < H)
+                    cv[qy[k] * W + qx[k]] = o->color;
+            py++;
+            if (err < 0) err += 2 * py + 1;
+            else { px--; err += 2 * (py - px) + 1; }
+        }
+    }
+}
+static void ring_drain_all(void) {
+    for (int i = 0; i < MAX_WIN; i++) {
+        struct win *w = &wins[i];
+        if (!w->used || !w->is_gfx || !w->canvas) continue;
+        if (!w->canvas_ok) {
+            memset((void *)(uintptr_t)w->canvas, 0, w->w * w->h * 4);
+            w->canvas_ok = 1;
+        }
+        while (rtail[i] != rhead[i]) {
+            struct drawop o = ring[i][rtail[i]];
+            rtail[i] = (rtail[i] + 1) % RING_N;
+            op_apply(i, &o);
+        }
+    }
 }
 
 /* ---------- 绘制 ---------- */
@@ -61,22 +265,40 @@ static void dtext(uint32_t x, uint32_t y, const char *s, uint32_t rgb, int maxco
 static void draw_window(int i) {
     struct win *w = &wins[i];
     int foc = (i == focus);
-    fb_rect(w->x, w->y, w->w, w->h, C_WIN_BG);
+    if (w->is_gfx) {
+        /* 画布整块 blit（未清底先给黑，防垃圾帧闪现） */
+        if (w->canvas_ok) {
+            /* 行拷贝走 rep movsl：画布 896KB 逐像素拷在 TCG 下太慢 */
+            const uint32_t *cv = (const uint32_t *)(uintptr_t)w->canvas;
+            for (uint32_t j = 0; j < w->h; j++) {
+                uint32_t *dst = (uint32_t *)(uintptr_t)
+                                (fb_addr + (w->y + j) * fb_pitch) + w->x;
+                const uint32_t *src = cv + j * w->w;
+                uint32_t n = w->w;
+                __asm__ volatile("cld; rep movsl" : "+c"(n), "+D"(dst), "+S"(src)
+                                 :: "memory");
+            }
+        } else {
+            fb_rect(w->x, w->y, w->w, w->h, 0x000000);
+        }
+    } else {
+        fb_rect(w->x, w->y, w->w, w->h, C_WIN_BG);
+        /* 内容：行环 + 当前输入行 */
+        int cols = (w->w - 8) / 8;
+        int rows = (w->h - 22) / 10;
+        if (rows < 1) rows = 1;
+        for (int r = 0; r < rows - 1 && r < w->nl; r++) {
+            int idx = (w->top + r) % WIN_ROWS;
+            dtext(w->x + 4, w->y + 20 + r * 10, w->lines[idx], C_TEXT, cols);
+        }
+        if (w->is_tty) {
+            int r = w->nl < rows - 1 ? w->nl : rows - 2;
+            dtext(w->x + 4, w->y + 20 + r * 10, w->input, C_TEXT, cols);
+            if (foc) fb_rect(w->x + 4 + w->ilen * 8, w->y + 20 + r * 10, 6, 8, C_TEXT);
+        }
+    }
     fb_rect(w->x, w->y, w->w, 16, foc ? C_TITLE_FOC : C_TITLE_UNFOC);
     dtext(w->x + 3, w->y + 4, w->title, 0xFFFFFF, (w->w - 6) / 8);
-    /* 内容：行环 + 当前输入行 */
-    int cols = (w->w - 8) / 8;
-    int rows = (w->h - 22) / 10;
-    if (rows < 1) rows = 1;
-    for (int r = 0; r < rows - 1 && r < w->nl; r++) {
-        int idx = (w->top + r) % WIN_ROWS;
-        dtext(w->x + 4, w->y + 20 + r * 10, w->lines[idx], C_TEXT, cols);
-    }
-    if (w->is_tty) {
-        int r = w->nl < rows - 1 ? w->nl : rows - 2;
-        dtext(w->x + 4, w->y + 20 + r * 10, w->input, C_TEXT, cols);
-        if (foc) fb_rect(w->x + 4 + w->ilen * 8, w->y + 20 + r * 10, 6, 8, C_TEXT);
-    }
     uint32_t bc = foc ? C_BORDER_FOC : C_BORDER_UNFOC;
     for (int t = 0; t < 2; t++) {
         fb_rect(w->x - t, w->y - t, w->w + 2 + 2 * t, 1, bc);
@@ -123,7 +345,10 @@ static int win_new(const char *title, uint32_t pid, int is_tty) {
     }
     for (int i = 0; i < MAX_WIN; i++) {
         if (wins[i].used) continue;
+        canvas_free(i);                      /* 防御：槽位残留画布先释放 */
         memset(&wins[i], 0, sizeof(wins[i]));
+        rhead[i] = rtail[i] = 0;
+        ehead[i] = etail[i] = 0;
         wins[i].used = 1;
         wins[i].pid = pid;
         wins[i].is_tty = is_tty;
@@ -154,19 +379,22 @@ static void win_puts(int i, const char *s) {         /* 追加内容行（\n 分
 /* ---------- 应用/任务联动（sys 22 spawn / 窗口跟随） ----------
  * 绘制纪律：帧缓冲只允许 gfx_task 单线程绘制（IRQ0 抢占下，spawn/execve
  * 的系统调用上下文若直接 draw_desktop 会与 gfx_task 的重绘交错出撕裂帧）。
- * 其他上下文只在 cli 临界区里改 wins[] 并置 gfx_dirty。 */
+ * 其他上下文只在 cli 临界区里改 wins[] 并推进 gfx_gen。 */
 int gfx_spawn_window(uint32_t pid, const char *title) {
     cli();
     int i = win_new(title, pid, 1);
-    gfx_dirty = 1;
+    gfx_gen++;
     sti();
     return i;
 }
 void gfx_on_exit(uint32_t pid) {                     /* 任务退出关窗 */
     cli();
     for (int i = 0; i < MAX_WIN; i++)
-        if (wins[i].used && wins[i].pid == pid) { wins[i].used = 0; }
-    gfx_dirty = 1;
+        if (wins[i].used && wins[i].pid == pid) {
+            canvas_free(i);
+            wins[i].used = 0;
+        }
+    gfx_gen++;
     sti();
 }
 
@@ -182,7 +410,7 @@ void tty_feed_global(char c) {                       /* gfx 前的键入 */
     }
 }
 int tty_read_global(char *out, int max) {
-    while (!legacy.ready) schedule();
+    while (!legacy.ready) { current->if_on = 0; schedule(); }
     int n = legacy.len < max ? legacy.len : max - 1;
     memcpy(out, legacy.line, n); out[n] = 0;
     legacy.len = 0; legacy.ready = 0;
@@ -198,7 +426,7 @@ void gfx_clear_focused(void) {
     w->top = 0; w->nl = 0;
     memset(w->input, 0, sizeof(w->input));
     w->ilen = 0;
-    gfx_dirty = 1;
+    gfx_gen++;
 }
 
 void gfx_console_write(uint32_t pid, const char *s, uint32_t n) {
@@ -208,7 +436,7 @@ void gfx_console_write(uint32_t pid, const char *s, uint32_t n) {
     uint32_t k = n < 255 ? n : 255;
     memcpy(tmp, s, k); tmp[k] = 0;
     win_puts((int)(w - wins), tmp);
-    gfx_dirty = 1;
+    gfx_gen++;
 }
 
 void tty_write_window(uint32_t pid, const char *s) { /* shell 输出进窗 */
@@ -238,6 +466,7 @@ int tty_read_window(uint32_t pid, char *out, int max) {
     if (!w) return tty_read_global(out, max);
     struct wtty *t = &wt[(int)(w - wins)];
     for (;;) {
+        current->if_on = 0;             /* 阻塞轮询发生在 int80 门内 */
         if (t->ready) {
             int n = t->len < max ? t->len : max - 1;
             memcpy(out, t->line, n); out[n] = 0;
@@ -257,7 +486,7 @@ void gfx_start(void) {
     extern task_t *current;
     cli();
     win_new("shell", current->pid, 1);
-    gfx_dirty = 1;
+    gfx_gen++;
     sti();
     gfx_on = 1;
 }
@@ -270,7 +499,7 @@ static int spawn_shell(void) {
 void gfx_task(void);
 void gfx_task(void) {
     static int fb_ready = 0;
-    static uint32_t lt = 0;
+    static unsigned drawn_gen = 0;      /* 已上屏的内容代数 */
     uint8_t btn; int16_t dx, dy;
     for (;;) {
         if (!gfx_active()) { task_yield(); continue; }
@@ -295,6 +524,10 @@ void gfx_task(void) {
                     if (cur_x >= (int)w->x && cur_x < (int)(w->x + w->w)
                      && cur_y >= (int)w->y && cur_y < (int)(w->y + w->h)) {
                         focus = i;
+                        if (w->is_gfx)                   /* 图形窗收点击事件 */
+                            gfx_ev_push(i, 2,
+                                        (long)(cur_x - (int)w->x),
+                                        (long)(cur_y - (int)w->y));
                         break;
                     }
                 }
@@ -311,15 +544,25 @@ void gfx_task(void) {
                 keyed = 1;
                 continue;
             }
-            if (c == '\n' || (c >= 32 && c < 127) || c == 8) gfx_key_feed((char)c);
+            {
+                struct win *w = &wins[focus];
+                if (w->used && w->is_gfx)
+                    gfx_ev_push(focus, 1, c, 0); /* 图形窗收原始键 */
+                else if (c == '\n' || (c >= 32 && c < 127) || c == 8)
+                    gfx_key_feed((char)c);
+            }
             keyed = 1;
         }
-        /* 输出驱动刷新：shell/应用经 gfx_console_write 置脏，
-         * 无键鼠事件时也要重绘（否则窗口内容"不刷新"） */
-        if (keyed || gfx_dirty) {
+        ring_drain_all();                        /* 图形窗：清底首帧+消费命令 */
+        /* 输出驱动刷新：以代数比较代替 test-and-clear 标志——布尔 dirty
+         * 会被并发绘制轮清掉（shell 在别任务上下文置脏的同一瞬间），丢一次
+         * 更新就永久停在旧帧；代数只增不减，漏不掉任何一轮改动。 */
+        gfx_passes++;
+        if (keyed || gfx_gen != drawn_gen) {
             draw_desktop();
             if (cur_on) cursor_draw();
-            gfx_dirty = 0;
+            drawn_gen = gfx_gen;
+            gfx_draws++;
         }
         task_yield();
     }

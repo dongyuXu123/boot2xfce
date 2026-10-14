@@ -60,8 +60,12 @@ void mouse_intr(void) {
 }
 
 int mouse_pop(uint8_t *btn, int16_t *dx, int16_t *dy) {
-    if (mh == mt) return 0;
+    /* 同 kbd_pop：关中断临界区防 IRQ12 压入与任务弹出交错丢事件 */
+    uint32_t fl;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(fl));
+    if (mh == mt) { __asm__ volatile("pushl %0; popfl" :: "r"(fl)); return 0; }
     *btn = mring[mt].btn; *dx = mring[mt].dx; *dy = mring[mt].dy;
     mt = (mt + 1) % MEV_MAX;
+    __asm__ volatile("pushl %0; popfl" :: "r"(fl));
     return 1;
 }

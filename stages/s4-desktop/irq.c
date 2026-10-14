@@ -55,15 +55,39 @@ static void kbd_intr(void) {
 }
 
 int kbd_pop(void) {
-    if (kbuf_head == kbuf_tail) return -1;
-    int c = kbuf[kbuf_tail];
-    kbuf_tail = (kbuf_tail + 1) % 32;
+    /* 关中断临界区：IRQ1 与任务弹出入交错时 head/tail 更新会互踩丢键
+     * （偶发"回车失灵"——毒化期 IF=0 切片拉长后被放大） */
+    uint32_t fl;
+    int c = -1;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(fl));
+    if (kbuf_head != kbuf_tail) {
+        c = kbuf[kbuf_tail];
+        kbuf_tail = (kbuf_tail + 1) % 32;
+    }
+    __asm__ volatile("pushl %0; popfl" :: "r"(fl));
     return c;
 }
 
 /* ---------- 异常现场转储（教学用：崩了能看见在哪） ---------- */
 static void fault_dump(struct regs *r) {
+    extern void debug_ser(const char *);
+    extern void debug_hex(uint32_t);
     cli();
+    debug_ser("\n[FAULT int_no=");
+    debug_hex(r->int_no);
+    debug_ser(" err=");
+    debug_hex(isr_err_code);
+    debug_ser(" cr2=");
+    debug_hex(read_cr2());
+    debug_ser(" eip=");
+    debug_hex(r->eip);
+    debug_ser(" cs=");
+    debug_hex(r->cs);
+    debug_ser(" esp=");
+    debug_hex(r->esp_);
+    debug_ser(" cr3=");
+    debug_hex(read_cr3());
+    debug_ser("]\n");
     print("\nS2: FAULT int_no=");
     print_dec(r->int_no);
     print(" eip=");
@@ -88,7 +112,9 @@ void isr_dispatch(struct regs *r) {
     } else if (r->int_no == 32) {       /* IRQ0 时钟 */
         ticks++;
         outb(0x20, 0x20);               /* 先 EOI 再调度：切换后本栈的 iret 不依赖 PIC */
-        schedule();
+        current->if_on = (r->eflags >> 9) & 1;   /* 被打断任务的真实 IF（在帧里） */
+        schedule();                     /* IF 毒化已由 switch_to 的 sti 根治：
+                                           每次切入都在 IF=1 的不变量上起跑 */
     } else if (r->int_no == 33) {       /* IRQ1 键盘 */
         outb(0x20, 0x20);
         kbd_intr();

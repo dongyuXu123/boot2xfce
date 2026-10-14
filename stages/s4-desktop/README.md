@@ -31,3 +31,32 @@ IRQ0 的 schedule() 是抢占点。任务创建期间（kmalloc 栈/页目录/ir
 其余曾修根因：保留区漏堆、页表帧 PDE1 盲区、低区 free 不拉 hint、
 pd 走普通分配器落用户窗口盲区、grub.cfg 勿加 gfxpayload/insmod vbe
 （文本引导 + 内核自切模式是已验证路径，加 vbe 反而引导卡死）。
+
+## 内核纯净原则（架构定调）
+
+内核只提供通用机制：窗口/画布/事件服务（win.c）、绘制与事件系统调用
+（sys25-29：wgfx/wrect/wtext/wevent/yield）、进程隔离（每任务页目录、
+T_EMBRYO、用户指针校验）。calc/clock/notepad 是纯用户 ELF——按钮布局、
+表盘、编辑缓冲全部在用户态，内核零应用知识。
+
+## 隔离与调度正确性（第三轮修复，2026-10-14）
+
+1. **page_dir_create 只继承 PDE0**：曾把 boot_pd 全部内核区（恒等映射/
+   LFB/画布别名）以共享页表继承给用户任务，execve 的 clear_user 把它们
+   当任务私产整张释放 → boot_pd 的 fb/画布映射随机蒸发（画布内容"灵异
+   消失"、err=2 写 0xfd000000 的总根因）。clear_user/copy_space 范围
+   同步收敛到用户窗口（PDE1-4）。
+2. **exit 必须切走**：sys(3) 标完 T_DEAD 就 break 返回，死任务霸占 CPU，
+   其内核栈被 reap 的 kfree 收回而 TSS esp0 仍指着它——此后每个中断往
+   "已释放的栈"压帧，随机腐蚀任何新主。现 exit 即 schedule 且不返回。
+3. **每任务 if_on**：switch_to 不携带 EFLAGS，协作切换都发生在 int80
+   门内（IF=0），关中断态沿调度链传染（gfx 饿死在 memset 半路、时钟全
+   停）。切回点按 task->if_on 恢复自己的 IF；PIT 抢占从帧里取被中断者
+   的真实 IF。
+4. **kbd/mouse 环形缓冲加锁**：IRQ 压入与任务弹出交错会丢键（偶发回车
+   失灵）。pop 侧关中断临界区。
+5. **fb_rect 裁剪 + rep stosl、画布 blit rep movsl**：TCG 下全屏重绘
+   曾需秒级，clock 每秒重绘把显示管线堵成永久撕裂态。
+
+已知问题：clock 窗能创建但首绘/聚焦偶发不就位（fork/exec 时序 flake +
+应用首绘），另行攻坚。

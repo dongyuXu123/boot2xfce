@@ -75,9 +75,11 @@ static int elf_load_pd(uint32_t *pd, const uint8_t *img, uint32_t size, uint32_t
     return 0;
 }
 
-/* 清掉页目录里的用户区（内核共享区不动）——execve 换像前调用 */
+/* 清掉页目录里的【用户窗口】（PDE1-4，任务私产）——execve 换像前调用。
+ * 范围绝不能扫到 1024：若扫了内核继承项，会把与 boot_pd 共享的恒等/LFB
+ * 页表当任务私产整张释放（见 page_dir_create 的注释，S4 总根因）。 */
 void page_dir_clear_user(uint32_t *pd) {
-    for (uint32_t i = PD_INDEX(USER_BASE); i < 1024; i++) {
+    for (uint32_t i = PD_INDEX(USER_BASE); i < PD_INDEX(USER_BASE + USER_SPAN); i++) {
         if (!(pd[i] & PG_P)) continue;
         uint32_t *pt = (uint32_t *)(pd[i] & ~0xFFF);
         for (uint32_t j = 0; j < 1024; j++)

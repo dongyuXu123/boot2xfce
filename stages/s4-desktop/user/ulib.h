@@ -18,4 +18,15 @@ static void uprint_dec(long v) {
     do { b[--i] = (char)('0' + v % 10); v /= 10; } while (v);
     sys(1, 1, (intptr_t)&b[i], 11 - i);
 }
+
+/* ---- 图形窗口 API（S4 canvas 模式，win.c 顶部注释述其原理） ---- */
+struct gfxrect { int x, y, w, h; unsigned color; };
+struct gfxtext { int x, y; unsigned color; char s[48]; };
+struct wxev { long type, a, b; };       /* 1=键(a=ASCII) 2=点击(a=x,b=y) */
+
+static void wgfx(void)                     { sys(25, 0, 0, 0); }
+static void wrect(const struct gfxrect *r) { sys(26, (intptr_t)r, 0, 0); }
+static void wtext(const struct gfxtext *t) { sys(27, (intptr_t)t, 0, 0); }
+static int  wevent(struct wxev *e)         { return (int)sys(28, (intptr_t)e, 0, 0); }
+static void wyield(void)                   { sys(29, 0, 0, 0); }
 #endif

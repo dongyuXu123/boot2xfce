@@ -79,9 +79,18 @@ void fb_pixel(uint32_t x, uint32_t y, uint32_t rgb) {
     ((volatile uint32_t *)(uintptr_t)(fb_addr + y * fb_pitch))[x] = rgb;
 }
 void fb_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t rgb) {
-    for (uint32_t j = 0; j < h; j++)
-        for (uint32_t i = 0; i < w; i++)
-            fb_pixel(x + i, y + j, rgb);
+    /* 裁剪一次 + rep stosl 整行填充：TCG 下逐像素 fb_rect 一次全屏
+     * 要数百毫秒，重绘频繁时画面长期停在撕裂中间态（clock 每秒重绘
+     * 曾把显示管线彻底堵死） */
+    if (x >= fb_w || y >= fb_h) return;
+    uint32_t x1 = x + w > fb_w ? fb_w : x + w;
+    uint32_t y1 = y + h > fb_h ? fb_h : y + h;
+    uint32_t n = x1 - x;
+    for (uint32_t yy = y; yy < y1; yy++) {
+        uint32_t *row = (uint32_t *)(uintptr_t)(fb_addr + yy * fb_pitch) + x;
+        __asm__ volatile("cld; rep stosl" : "+c"(n), "+D"(row) : "a"(rgb) : "memory");
+        n = x1 - x;
+    }
 }
 void fb_blit(void) { }   /* 直写 LFB；接口为将来双缓冲保留 */
 

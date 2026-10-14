@@ -40,6 +40,7 @@ void tasks_init(void) {
     memset(&boot_task, 0, sizeof(boot_task));
     boot_task.pid   = 0;
     boot_task.state = T_RUNNING;
+    boot_task.if_on = 1;            /* 不然切回点 cli 后 hlt 永久沉睡 */
     current = &boot_task;
 }
 
@@ -49,6 +50,7 @@ task_t *task_create(void (*entry)(void), int is_user) {
         task_t *t = &tasks[i];
         memset(t, 0, sizeof(*t));
         t->pid        = next_pid++;
+        t->if_on      = 1;             /* 新任务以 IF=1 不变量起跑 */
         t->state      = T_EMBRYO;      /* 构造完才 READY（见 kernel.h 注释） */
         t->entry      = entry;
         t->is_user    = is_user;
@@ -97,6 +99,7 @@ task_t *task_clone(task_t *parent, struct regs *r) {
     memset(t, 0, sizeof(*t));
     t->pid        = next_pid++;
     t->ppid       = parent->pid;
+    t->if_on      = 1;
     t->state      = T_EMBRYO;      /* fork 同样构造完才 READY */
     t->is_user    = 1;
     t->kstack     = kmalloc(4096);
@@ -164,9 +167,11 @@ void schedule(void) {
     /* S3-M2：地址空间随任务切换——换任务必换 CR3（内核任务共享 boot_pd） */
     uint32_t *npd = next->pd ? next->pd : page_kernel_pd();
     if (npd != active_pd) load_cr3((uint32_t)npd);
-    {
-    }
     switch_to(&prev->kesp, next->kesp);
+    /* 切回点：此刻已是"自己"的执行流。switch_to 不携带 EFLAGS，协作切换
+     * 又都发生在 int80 门内（IF=0），若不按 if_on 恢复，关中断态会沿
+     * 调度链传染（gfx 曾被饿死在 memset 半路）。 */
+    if (current->if_on) sti(); else cli();
 }
 
 /* wait 的扫描半边：找到属于 pid 的死子并回收，返回其 pid（0=没有） */

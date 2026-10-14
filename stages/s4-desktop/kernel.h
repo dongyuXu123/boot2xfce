@@ -62,6 +62,16 @@ static inline uint32_t read_cr2(void) {
     __asm__ volatile("mov %%cr2,%0" : "=r"(v));
     return v;
 }
+static inline uint32_t read_eflags(void) {
+    uint32_t v;
+    __asm__ volatile("pushfl; popl %0" : "=r"(v));
+    return v;
+}
+static inline uint32_t read_cr3(void) {
+    uint32_t v;
+    __asm__ volatile("mov %%cr3,%0" : "=r"(v));
+    return v;
+}
 /* load_cr3 必须同步记录 active_pd：缺页处理全靠它找当前页目录。
  * （曾经的 bug：只动 CR3 不记变量，切任务后 COW/按需全写进幽灵表） */
 extern uint32_t *active_pd;
@@ -83,6 +93,8 @@ static inline void enable_paging(void) {
 /* ---------- console.c（照 vt.c 的 VGA 控制台） ---------- */
 void console_init(void);
 void console_write(const char *s, uint32_t n);
+void debug_ser(const char *s);           /* 直打串口（诊断用） */
+void debug_hex(uint32_t v);
 void console_clear(void);
 void print(const char *s);              /* 串口 + VGA 双路 */
 void print_hex(uint32_t v);
@@ -190,6 +202,15 @@ void tty_write_window(uint32_t pid, const char *s);
 void gfx_console_write(uint32_t pid, const char *s, uint32_t n);
 int  win_by_pid_ok(uint32_t pid);
 
+/* 图形窗口（canvas 模式）：应用经 syscall 作画/收事件，见 win.c 顶部注释 */
+struct wmev { int type; long a, b; };  /* 1=键(a=ASCII) 2=点击(a=x,b=y 窗内) */
+int  gfx_mode_on(uint32_t pid);
+int  gfx_rect(uint32_t pid, int x, int y, int w, int h, uint32_t color);
+int  gfx_text(uint32_t pid, int x, int y, uint32_t color, const char *s);
+int  gfx_line(uint32_t pid, int x0, int y0, int x1, int y1, uint32_t color);
+int  gfx_circle(uint32_t pid, int cx, int cy, int r, uint32_t color);
+int  gfx_ev_pop(uint32_t pid, struct wmev *out);
+
 /* ---------- tty.c（S3-M6 行规程） ---------- */
 void tty_init(void);
 void tty_feed(char c);
@@ -215,6 +236,9 @@ struct context {
 typedef struct task {
     uint32_t     pid;
     tstate_t     state;
+    int          if_on;                 /* 本任务应持有的 IF（switch_to 不携带 EFLAGS，
+                                         * 协作切换发生在 int80 门内会漏 IF=0 给被切入者；
+                                         * 切回点按此恢复——毒化/饿死的总根因） */
     uint32_t     kesp;                  /* 被换出时的内核栈指针（switch_to 保存/加载） */
     uint8_t     *kstack;                /* kmalloc 的 4KiB 内核栈 */
     uint32_t     kstack_top;
