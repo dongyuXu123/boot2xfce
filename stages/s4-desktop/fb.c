@@ -48,13 +48,18 @@ void fb_init(void) {
     dispi_set(DISPI_BPP, 32);
     dispi_set(DISPI_ENABLE, DISPI_ENABLED | DISPI_LFB);
 
+    /* LFB 基址：PCI 探测 std VGA BAR0（0xFD000000），兜底常量。
+     * 分辨率/行距硬编码 640x480x32（与 dispi 设置一致）——
+     * 不要从 multiboot fb 字段读：GRUB 文本模式下那描述的是文本平面
+     * （0xB8000/720x400），会让所有 fb_pixel 被边界检查拒绝（黑屏）。 */
     uint32_t base = 0xFD000000u;
     uint32_t vdid = pci_read(0, 2, 0, 0);
     if ((vdid & 0xFFFF) == 0x1234) {
         uint32_t bar0 = pci_read(0, 2, 0, 0x10);
         if (bar0) base = bar0 & ~0xFu;
     }
-    fb_addr = base; fb_pitch = 640 * 4; fb_w = 640; fb_h = 480;
+    fb_addr = base; fb_pitch = 640 * 4;
+    fb_w = 640; fb_h = 480;
     for (uint32_t va = fb_addr & ~0xFFFFFu; va < fb_addr + 0x400000u; va += 0x1000u)
         page_map(page_kernel_pd(), va, va, 0, 1);
     reload_cr3();

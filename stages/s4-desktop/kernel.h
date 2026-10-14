@@ -168,6 +168,8 @@ void fb_char(uint32_t x, uint32_t y, char c, uint32_t rgb);
 void fb_text(uint32_t x, uint32_t y, const char *s, uint32_t rgb);
 extern uint32_t fb_addr, fb_pitch, fb_w, fb_h;
 
+extern struct mb_info *g_mb;
+
 /* ---------- mouse.c（S4 PS/2 鼠标） ---------- */
 void mouse_init(void);
 void mouse_intr(void);

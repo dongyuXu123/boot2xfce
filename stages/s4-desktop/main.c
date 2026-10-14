@@ -6,7 +6,10 @@
 
 struct mb_info *g_mb;
 
+struct mb_info *g_mb;
+
 void kmain(uint32_t magic, struct mb_info *mb) {
+    g_mb = mb;
     console_init();
     print("S4: booting, multiboot magic=");
     print_hex(magic);
