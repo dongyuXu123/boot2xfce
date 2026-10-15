@@ -6,7 +6,6 @@
 
 struct mev { uint8_t btn; int16_t dx, dy; };
 #define MEV_MAX 64
-volatile unsigned mi_cnt, mp_cnt;
 static struct mev mring[MEV_MAX];
 static int mh, mt;
 static uint8_t pk[3];
@@ -16,11 +15,6 @@ static void aux_wait_in(void) { for (int i = 0; i < 100000 && (inb(0x64) & 2); i
 static void aux_wait_out(void) { for (int i = 0; i < 100000 && !(inb(0x64) & 1); i++); }
 static void aux_write(uint8_t b) {
     aux_wait_in(); outb(0x64, 0xD4); aux_wait_in(); outb(0x60, b);
-}
-/* 排干输出缓冲：ACK/自检字节数量与时序不定（QEMU 异步投递），按数硬吞
- * 会残留滞留字节甚至吞失败——启用上报(0xF4)实际没生效，鼠标从此静默 */
-static void aux_flush(void) {
-    for (int i = 0; i < 200000 && (inb(0x64) & 1); i++) inb(0x60);
 }
 
 void mouse_init(void) {
@@ -32,7 +26,10 @@ void mouse_init(void) {
     aux_wait_in(); outb(0x60, cfg);
     aux_write(0xF6);                            /* 默认参数 */
     aux_write(0xF4);                            /* 开上报 */
-    aux_flush();                                /* 排干 ACK/自检滞留 */
+    /* 吞掉两条 ACK(0xFA)，防误当数据包 */
+    for (int i = 0; i < 2; i++) {
+        aux_wait_out(); inb(0x60);
+    }
     /* 从片开 IRQ12 */
     outb(0xA1, (inb(0xA1) & ~(1u << 4)));
 }
@@ -45,7 +42,6 @@ static void push(uint8_t btn, int16_t dx, int16_t dy) {
 }
 
 void mouse_intr(void) {
-    mi_cnt++;
     uint8_t st = inb(0x64);
     if (!(st & 1)) return;
     uint8_t d = inb(0x60);
@@ -64,7 +60,6 @@ void mouse_intr(void) {
 }
 
 int mouse_pop(uint8_t *btn, int16_t *dx, int16_t *dy) {
-    if (mh != mt) mp_cnt++;
     /* 同 kbd_pop：关中断临界区防 IRQ12 压入与任务弹出交错丢事件 */
     uint32_t fl;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(fl));

@@ -4,9 +4,7 @@
  */
 #include "../user/ulib.h"
 
-#define CX 280
-#define CY 178
-#define R  148
+static long CX, CY, R;                     /* 表盘圆心/半径（按窗口尺寸自适应） */
 
 static const short SIN6[16] = {            /* sin(6k°)*1000, k=0..15 */
     0, 105, 208, 309, 407, 500, 588, 669,
@@ -22,27 +20,27 @@ static int isin(int deg) {                 /* 任意整数角度 → x1000 */
 }
 static int icos(int deg) { return isin(deg + 90); }
 
-static void hand(int deg, int len, unsigned color) {
+static void hand(long deg, long len, unsigned color) {
     struct gfxrect l = { CX, CY,
                          CX + len * icos(deg) / 1000,
                          CY - len * isin(deg) / 1000, color };
     wrect(&l);                             /* LINE 语义：w,h 复用为终点 */
 }
 static void draw_digit(const char *s) {
-    struct gfxtext t = { CX - 32, 348, 0x8395A7, {0} };
+    struct gfxtext t = { CX - 32, CY + R + 22, 0x8395A7, {0} };
     int i;
     for (i = 0; s[i] && i < 40; i++) t.s[i] = s[i];
     wtext(&t);
 }
 static void repaint(uint32_t t) {
-    uint32_t h = t / 10000, m = t / 100 % 100, s = t % 100;
-    struct gfxrect bg = { 0, 0, 640, 480, 0x0F1420u };
+    long h = t / 10000, m = t / 100 % 100, s = t % 100;
+    struct gfxrect bg = { 0, 0, 4096, 4096, 0x0F1420u };
     struct gfxrect hub = { CX - 3, CY - 3, 6, 6, 0xE8E8E8u };
     struct gfxrect face = { CX, CY, R, 0, 0x8395A7u };
     wrect(&bg);
     wrect(&face);                          /* CIRCLE 语义：w 复用为半径 */
     for (int k = 0; k < 60; k++) {         /* 刻度：5 的倍数长而亮 */
-        int r2 = (k % 5 == 0) ? 130 : 140;
+        long r2 = (k % 5 == 0) ? R * 88 / 100 : R * 95 / 100;
         struct gfxrect tick = { CX + R * icos(k * 6) / 1000,
                                 CY - R * isin(k * 6) / 1000,
                                 CX + r2 * icos(k * 6) / 1000,
@@ -50,9 +48,9 @@ static void repaint(uint32_t t) {
                                 (k % 5 == 0) ? 0xE8E8E8u : 0x57606Fu };
         wrect(&tick);
     }
-    hand((int)((h % 12) * 30 + m / 2), 70, 0xE8E8E8u);
-    hand((int)(m * 6), 105, 0xE8E8E8u);
-    hand((int)(s * 6), 135, 0xE74C3Cu);
+    hand((h % 12) * 30 + m / 2, R * 47 / 100, 0xE8E8E8u);
+    hand(m * 6, R * 71 / 100, 0xE8E8E8u);
+    hand(s * 6, R * 91 / 100, 0xE74C3Cu);
     wrect(&hub);
     char d[9];
     d[0] = (char)('0' + h / 10); d[1] = (char)('0' + h % 10);
@@ -65,8 +63,14 @@ static void repaint(uint32_t t) {
 }
 
 void user_main(void) {
+    long w = 0, h = 0;
     sys(11, (intptr_t)"/dev/tty", 0, 0);
     wgfx();
+    winsize(&w, &h);
+    CX = w / 2;
+    CY = (h - 60) / 2 + 10;
+    R = (w < h ? w : h) / 2 - 30;
+    if (R < 40) R = 40;
     uint32_t last = 0xFFFFFFFFu;
     for (;;) {
         uint32_t t = sys(23, 0, 0, 0);

@@ -75,6 +75,12 @@ static struct win *win_by_pid(uint32_t pid) {
         if (wins[i].used && wins[i].pid == pid) return &wins[i];
     return 0;
 }
+int win_size_of(uint32_t pid, uint32_t *w, uint32_t *h) {
+    struct win *v = win_by_pid(pid);
+    if (!v) return -1;
+    *w = v->w; *h = v->h;
+    return 0;
+}
 
 /* ---------- 画布：分配 = pmm 帧 + boot_pd 别名（仅内核视角） ---------- */
 static void canvas_free(int i) {
@@ -373,10 +379,10 @@ static int win_new(const char *title, uint32_t pid, int is_tty) {
         wins[i].pid = pid;
         wins[i].is_tty = is_tty;
         for (int j = 0; j < 23 && title[j]; j++) wins[i].title[j] = title[j];
-        wins[i].x = 30 + (i % 2) * 90;
-        wins[i].y = 24 + (i / 2) * 60;
-        wins[i].w = 560;
-        wins[i].h = 400;
+        wins[i].x = 20 + (i % 3) * 70;
+        wins[i].y = 16 + (i / 3) * 36;
+        wins[i].w = 400;
+        wins[i].h = 280;
         zlist[zn++] = i;                     /* 新窗落最顶 */
         focus = i;
         return i;
