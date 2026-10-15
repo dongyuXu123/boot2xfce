@@ -59,6 +59,14 @@ VFS 与 fd 表(2) · Ext2 只读(2) · TTY 行规程 + shell(2)。每实现一�
 Track A 真栈：裁剪 linux + BusyBox + 逐模块编 Xfce（每模块一课）；
 Track B 自研：framebuffer / 字体 / 窗口系统 / 演示应用（每层一课）。
 
+## 讲义（每课：为什么 + 坑与历史错误）
+
+- `course/notes/L01-讲义.md` … `L19-讲义.md`：逐课讲义，与任务书配套——
+  任务书说"写什么"，讲义说"为什么"与"哪里有坑"。
+- 全部"坑与历史错误"来自本项目 S3/S4 实战（精确到起源与修复），
+  例如 L12 的低 1MiB 保留、L14 的 switch_to 不携带 EFLAGS、
+  L16 的 exit 必须切走、L17 的 PIE 平铺陷阱等。
+
 ## 工具
 
 ```bash
