@@ -133,6 +133,11 @@ task_t *task_clone(task_t *parent, struct regs *r) {
     t->uesp  = r->esp;
 
     t->pd = page_dir_create();
+    if (!t->pd) {                        /* 低区耗尽：回收并报告 fork 失败 */
+        kfree(t->kstack);
+        memset(t, 0, sizeof(*t));
+        return 0;
+    }
     page_copy_space(t->pd, parent->pd);
     t->state = T_READY;                /* COW 地址空间与现场就绪，放行 */
     return t;

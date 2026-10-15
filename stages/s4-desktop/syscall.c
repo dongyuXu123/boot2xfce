@@ -187,6 +187,20 @@ void syscall_dispatch(struct regs *r) {
         r->eax = (uint32_t)got;
         break;
     }
+    case 31: {                                  /* wline(&{x0,y0,x1,y1,color}) */
+        if (!uptr_ok(r->ebx, 20)) { r->eax = (uint32_t)-1; break; }
+        extern int gfx_line(uint32_t, int, int, int, int, uint32_t);
+        uint32_t *p = (uint32_t *)(uintptr_t)r->ebx;
+        r->eax = (uint32_t)gfx_line(current->pid, (int)p[0], (int)p[1], (int)p[2], (int)p[3], p[4]);
+        break;
+    }
+    case 32: {                                  /* wcircle(&{cx,cy,r,color}) */
+        if (!uptr_ok(r->ebx, 16)) { r->eax = (uint32_t)-1; break; }
+        extern int gfx_circle(uint32_t, int, int, int, uint32_t);
+        uint32_t *p = (uint32_t *)(uintptr_t)r->ebx;
+        r->eax = (uint32_t)gfx_circle(current->pid, (int)p[0], (int)p[1], (int)p[2], p[3]);
+        break;
+    }
     case 30: {                                  /* winsize(&w, &h)：本窗尺寸 */
         if (!uptr_ok(r->ebx, 4) || !uptr_ok(r->ecx, 4)) { r->eax = (uint32_t)-1; break; }
         extern int win_size_of(uint32_t pid, uint32_t *w, uint32_t *h);

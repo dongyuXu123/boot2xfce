@@ -121,6 +121,7 @@ int  kbd_pop(void);                     /* 有键返回 ASCII，无键返回 -1 
 void pmm_init(struct mb_info *mb);
 uint32_t pmm_total_frames(void);
 uint32_t pmm_alloc_frame(void);
+uint32_t pmm_alloc_frame_high(void);   /* ≥4MiB：画布等大块专用，不碰 PDE0 低区 */
 uint32_t pmm_alloc_frame_low(void);     /* PDE0 可见区：内核要预处理的目标帧 */
 void     pmm_free_frame(uint32_t addr);
 void heap_init(void);

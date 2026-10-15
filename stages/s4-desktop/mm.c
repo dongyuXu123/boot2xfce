@@ -69,13 +69,24 @@ uint32_t pmm_alloc_frame_low(void) {
     if (!low_hint) low_hint = ((uint32_t)(uintptr_t)kernel_end + 4095) / 4096u;
     for (uint32_t f = low_hint; f < 0x200000u / 4096u; f++)
         if (!bm_get(f)) { bm_set(f); low_hint = f + 1; return f * 4096u; }
-    return pmm_alloc_frame();            /* 低区耗尽：退回普通分配（内核视角用） */
+    /* 低区耗尽：返回 0（调用方须检查）。绝不退回高区帧——高区帧在
+     * PDE0-only 任务页目录不可见，页表/PD 落上去会在任务视角 memset
+     * 时静默失效，fork 卡死/三重故障（S4 画布×3 后首 fork 即挂实测） */
+    return 0;
 }
 
 uint32_t pmm_alloc_frame(void) {
     for (uint32_t f = pmm_hint; f < pmm_total; f++)
         if (!bm_get(f)) { bm_set(f); pmm_hint = f + 1; return f * 4096u; }
     return 0;                                      /* 没了 */
+}
+
+/* 高区分配：从 4MiB 起找空帧，绝不触碰 PDE0 低区。画布等"仅内核经
+ * boot_pd 恒等别名访问"的大块专用——低区帧留给页表/PD/用户页 */
+uint32_t pmm_alloc_frame_high(void) {
+    for (uint32_t f = 1024u; f < pmm_total; f++)
+        if (!bm_get(f)) { bm_set(f); return f * 4096u; }
+    return 0;
 }
 
 void pmm_free_frame(uint32_t addr) {

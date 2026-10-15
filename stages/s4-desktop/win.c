@@ -106,7 +106,7 @@ int gfx_mode_on(uint32_t pid) {
         uint32_t va = GFX_VA_BASE + (uint32_t)i * GFX_SLOT;
         uint32_t n = (w->w * w->h * 4 + 4095) >> 12, bad = 0;
         for (uint32_t k = 0; k < n && !bad; k++) {
-            uint32_t pa = pmm_alloc_frame();
+            uint32_t pa = pmm_alloc_frame_high();
             if (!pa) bad = 1;
             else page_map(page_kernel_pd(), va + k * 4096u, pa, 0, 1);
         }

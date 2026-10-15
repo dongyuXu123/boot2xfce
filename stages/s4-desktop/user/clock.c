@@ -36,17 +36,15 @@ static void repaint(uint32_t t) {
     long h = t / 10000, m = t / 100 % 100, s = t % 100;
     struct gfxrect bg = { 0, 0, 4096, 4096, 0x0F1420u };
     struct gfxrect hub = { CX - 3, CY - 3, 6, 6, 0xE8E8E8u };
-    struct gfxrect face = { CX, CY, R, 0, 0x8395A7u };
     wrect(&bg);
-    wrect(&face);                          /* CIRCLE 语义：w 复用为半径 */
+    wcircle(CX, CY, R, 0x8395A7u);         /* 表圈 */
     for (int k = 0; k < 60; k++) {         /* 刻度：5 的倍数长而亮 */
         long r2 = (k % 5 == 0) ? R * 88 / 100 : R * 95 / 100;
-        struct gfxrect tick = { CX + R * icos(k * 6) / 1000,
-                                CY - R * isin(k * 6) / 1000,
-                                CX + r2 * icos(k * 6) / 1000,
-                                CY - r2 * isin(k * 6) / 1000,
-                                (k % 5 == 0) ? 0xE8E8E8u : 0x57606Fu };
-        wrect(&tick);
+        wline(CX + R * icos(k * 6) / 1000,
+              CY - R * isin(k * 6) / 1000,
+              CX + r2 * icos(k * 6) / 1000,
+              CY - r2 * isin(k * 6) / 1000,
+              (k % 5 == 0) ? 0xE8E8E8u : 0x57606Fu);
     }
     hand((h % 12) * 30 + m / 2, R * 47 / 100, 0xE8E8E8u);
     hand(m * 6, R * 71 / 100, 0xE8E8E8u);
