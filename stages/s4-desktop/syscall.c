@@ -82,8 +82,6 @@ void syscall_dispatch(struct regs *r) {
         }
         kname[15] = 0;
         int rc = task_exec_image(current, kname);
-        { extern void debug_ser(const char *);
-          debug_ser(rc == 0 ? "[exec ok]\n" : "[exec fail]\n"); }
         if (rc == 0) {
             /* gfx 模式：为换像后的程序开自己的窗口（应用窗） */
             if (gfx_active()) {
@@ -191,16 +189,6 @@ void syscall_dispatch(struct regs *r) {
         task_yield();
         r->eax = 0;
         break;
-    case 30: {                                  /* winsize(&w, &h)：本窗尺寸 */
-        if (!uptr_ok(r->ebx, 4) || !uptr_ok(r->ecx, 4)) { r->eax = (uint32_t)-1; break; }
-        extern int win_size_of(uint32_t pid, uint32_t *w, uint32_t *h);
-        uint32_t ww = 0, hh = 0;
-        if (win_size_of(current->pid, &ww, &hh) != 0) { r->eax = (uint32_t)-1; break; }
-        *(uint32_t *)(uintptr_t)r->ebx = ww;
-        *(uint32_t *)(uintptr_t)r->ecx = hh;
-        r->eax = 0;
-        break;
-    }
     case 17:                                    /* gfx：进入图形演示 */
         gfx_start();
         r->eax = 0;

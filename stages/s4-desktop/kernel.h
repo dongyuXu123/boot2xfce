@@ -121,7 +121,6 @@ int  kbd_pop(void);                     /* 有键返回 ASCII，无键返回 -1 
 void pmm_init(struct mb_info *mb);
 uint32_t pmm_total_frames(void);
 uint32_t pmm_alloc_frame(void);
-uint32_t pmm_alloc_frame_high(void);   /* ≥4MiB：画布/内核页表专用，不碰 PDE0 低区 */
 uint32_t pmm_alloc_frame_low(void);     /* PDE0 可见区：内核要预处理的目标帧 */
 void     pmm_free_frame(uint32_t addr);
 void heap_init(void);
@@ -253,8 +252,6 @@ typedef struct task {
 
 extern task_t *current;
 void tasks_init(void);
-void task_kill(uint32_t pid);          /* 关窗关闭应用：终止归属任务并回收 */
-void task_kill(uint32_t pid);          /* 关窗关闭应用：终止归属任务并回收 */
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 uint32_t task_wait_scan(uint32_t pid);

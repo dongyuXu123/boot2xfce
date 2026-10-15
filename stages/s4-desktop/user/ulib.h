@@ -29,5 +29,4 @@ static void wrect(const struct gfxrect *r) { sys(26, (intptr_t)r, 0, 0); }
 static void wtext(const struct gfxtext *t) { sys(27, (intptr_t)t, 0, 0); }
 static int  wevent(struct wxev *e)         { return (int)sys(28, (intptr_t)e, 0, 0); }
 static void wyield(void)                   { sys(29, 0, 0, 0); }
-static void winsize(long *w, long *h)      { long b[2] = {0, 0}; sys(30, (intptr_t)b, (intptr_t)(b + 1), 0); *w = b[0]; *h = b[1]; }
 #endif

@@ -150,23 +150,6 @@ int task_spawn(const char *path, uint32_t ppid, const char *title) {
     return (int)t->pid;
 }
 
-/* 关窗关闭应用：终止归属任务并回收资源。死任务永不再被调度，
- * 栈/页目录此刻无人在用；孤儿过继给 0，由 reap_orphans 统一收尸。 */
-void task_kill(uint32_t pid) {
-    task_t *t = 0;
-    if (pid == 0 || pid == current->pid) return;
-    for (int i = 0; i < MAX_TASKS; i++)
-        if (tasks[i].state != T_EMPTY && tasks[i].pid == pid) { t = &tasks[i]; break; }
-    if (!t || t->state == T_DEAD) return;
-    for (int i = 0; i < MAX_TASKS; i++)
-        if (tasks[i].state != T_EMPTY && tasks[i].ppid == pid) tasks[i].ppid = 0;
-    t->state = T_DEAD;
-    gfx_on_exit(pid);                   /* 关窗 + 释放画布 */
-    if (t->kstack) kfree(t->kstack);
-    if (t->pd) page_dir_destroy(t->pd);
-    memset(t, 0, sizeof(*t));
-}
-
 /* 时间片轮转：从上次调度的下一个槽位开始找 READY */
 void schedule(void) {
     static int last = -1;
@@ -185,11 +168,10 @@ void schedule(void) {
     uint32_t *npd = next->pd ? next->pd : page_kernel_pd();
     if (npd != active_pd) load_cr3((uint32_t)npd);
     switch_to(&prev->kesp, next->kesp);
-    /* 已知限制：switch_to 不携带 EFLAGS，被切入任务继承切出者的 IF。
-     * 协作切换都发生在 int80 门内（IF=0），内核任务（kbd/gfx，轮询型）
-     * 偶发以 IF=0 跑一个时间片——事件注入/时钟延迟一拍，下一用户态切片
-     * 自行恢复。彻底修复需 per-task EFLAGS 的安全切换设计（V1 的 ISR 内
-     * 恢复行会确定性 GP(0xba0c)@iretd，已回退，待 QEMU 指令级追踪）。 */
+    /* 切回点：此刻已是"自己"的执行流。switch_to 不携带 EFLAGS，协作切换
+     * 又都发生在 int80 门内（IF=0），若不按 if_on 恢复，关中断态会沿
+     * 调度链传染（gfx 曾被饿死在 memset 半路）。 */
+    if (current->if_on) sti(); else cli();
 }
 
 /* wait 的扫描半边：找到属于 pid 的死子并回收，返回其 pid（0=没有） */
@@ -215,11 +197,8 @@ void sched_loop(void) {                 /* 主 CPU 变成调度器，永不再�
     }
 }
 
-void task_yield(void) {                 /* 内核任务主动让出：切到调度器上下文 */
-    /* 不走 int20+task→task 直接切换：switch_to 不携带 EFLAGS，会让出发者
-     * 的 IF 污染被切入者（协作切换都在 int80 门内=IF=0，gfx 饿死/点击丢失
-     * 的根源）。切到 boot（调度器）上下文，由它以 IF=1 挑选下一任务 */
-    switch_to(&current->kesp, boot_task.kesp);
+void task_yield(void) {                 /* 内核任务主动让出：软触发时钟中断 */
+    __asm__ volatile("int $0x20");
 }
 
 /* ---------- 示例内核任务 ---------- */
