@@ -48,7 +48,7 @@ task_t *task_create(void (*entry)(void), int is_user) {
         task_t *t = &tasks[i];
         memset(t, 0, sizeof(*t));
         t->pid        = next_pid++;
-        t->state      = T_READY;
+        t->state      = T_EMBRYO;      /* 构造完才 READY（防 tick 抢占半成品） */
         t->entry      = entry;
         t->is_user    = is_user;
         t->kstack     = kmalloc(4096);
@@ -67,6 +67,7 @@ task_t *task_create(void (*entry)(void), int is_user) {
             utask_eip = USER_BASE;
             utask_esp = USER_TOP;
         }
+        t->state = T_READY;                /* 构造完成，放行 */
         return t;
     }
     return NULL;
@@ -97,8 +98,13 @@ void sched_loop(void) {                 /* 主 CPU 变成调度器，永不再�
     }
 }
 
-void task_yield(void) {                 /* 内核任务主动让出：软触发时钟中断 */
-    __asm__ volatile("int $0x20");
+void task_yield(void) {                 /* 内核任务主动让出：切到调度器上下文 */
+    /* 不走 int $0x20：PIT 只抢占用户态（内核态 tick 直接返回），协作让路
+     * 必须自标 READY 后切到 boot（调度器）上下文，由它挑选下一任务。
+     * 切回点在本函数返回之后——被切入者继承切出者 IF 的毒化，由各轮询
+     * 任务循环顶的 sti 自愈 */
+    current->state = T_READY;
+    switch_to(&current->kesp, boot_task.kesp);
 }
 
 /* ---------- 示例内核任务 ---------- */

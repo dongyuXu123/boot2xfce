@@ -26,13 +26,18 @@ void syscall_dispatch(struct regs *r) {
     case 2:                                     /* getpid */
         r->eax = current->pid;
         break;
-    case 3:                                     /* exit */
+    case 3: {                                   /* exit */
         current->state = T_DEAD;
         print("S2: [user] exit, pid=");
         print_dec(current->pid);
         print("\n");
         r->eax = 0;
-        break;
+        /* 必须立刻切走且永不返回：死任务若继续霸占 CPU（哪怕挂在用户态
+         * .hang 死循环），S3 引入 reap/kfree 后其内核栈会被收走，而 TSS
+         * esp0 仍指着它——每个中断都往"已释放的栈"里压帧，随机腐蚀新主人 */
+        schedule();
+        for (;;) hlt();
+    }
     case 4:                                     /* uptime */
         r->eax = ticks;
         break;

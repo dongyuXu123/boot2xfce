@@ -55,9 +55,15 @@ static void kbd_intr(void) {
 }
 
 int kbd_pop(void) {
-    if (kbuf_head == kbuf_tail) return -1;
-    int c = kbuf[kbuf_tail];
-    kbuf_tail = (kbuf_tail + 1) % 32;
+    /* 关中断临界区：IRQ1 压入与任务弹出交错时 head/tail 更新会互踩丢键 */
+    uint32_t fl;
+    int c = -1;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(fl));
+    if (kbuf_head != kbuf_tail) {
+        c = kbuf[kbuf_tail];
+        kbuf_tail = (kbuf_tail + 1) % 32;
+    }
+    __asm__ volatile("pushl %0; popfl" :: "r"(fl));
     return c;
 }
 
@@ -86,6 +92,10 @@ void isr_dispatch(struct regs *r) {
     } else if (r->int_no == 32) {       /* IRQ0 时钟 */
         ticks++;
         outb(0x20, 0x20);               /* 先 EOI 再调度：切换后本栈的 iret 不依赖 PIC */
+        /* 只抢占用户态：内核态任务靠协作让路（task_yield 自报 IF）。
+         * 内核态帧 IF=0（门所致），据此抢占切换会把关中断态经 switch_to
+         * 传染给下一任务（S4 实测：gfx 饿死/输入丢失的毒化根源） */
+        if ((r->cs & 3) == 0) return;
         schedule();
     } else if (r->int_no == 33) {       /* IRQ1 键盘 */
         outb(0x20, 0x20);

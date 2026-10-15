@@ -100,7 +100,7 @@ int  ramfs_read(const char *name, void *buf, uint32_t max);  /* 返回实际长�
 void ramfs_list(void);                  /* 打印文件表 */
 
 /* ---------- task.c ---------- */
-typedef enum { T_EMPTY, T_READY, T_RUNNING, T_DEAD } tstate_t;
+typedef enum { T_EMPTY, T_EMBRYO, T_READY, T_RUNNING, T_DEAD } tstate_t;
 
 /* switch_to 保存的内核上下文（与 cpu.asm 压栈顺序严格对应：
  * push ebx,esi,edi,ebp 后 ebp 位于最低地址，ret 取 eip） */
