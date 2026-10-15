@@ -8,7 +8,7 @@
 #define PMM_FRAMES  (PMM_LIMIT / 4096)
 static uint8_t  pmm_bm[PMM_FRAMES / 8];    /* 16KiB，在内核 .bss 里 */
 static uint32_t pmm_total;
-static uint32_t pmm_hint;                  /* 分配扫描提示，加速 first-fit */
+static uint32_t pmm_hint;                  /* 分配扫描提示，加速 first-fit */                  /* 分配扫描提示，加速 first-fit */
 
 extern uint8_t kernel_end[];               /* kernel.ld 导出的内核映像末尾 */
 

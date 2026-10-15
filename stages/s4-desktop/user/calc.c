@@ -47,9 +47,11 @@ static long eval_e(void) {
     }
 }
 
-/* ---------- UI ---------- */
-#define BX(c) (10 + (c) * 138)
-#define BY(r) (90 + (r) * 60)
+/* ---------- UI（按 winsize 自适应） ---------- */
+static long BW, GH;
+static int GY;
+#define BX(c) (8 + (c) * (int)(BW + 6))
+#define BY(r) (GY + (r) * (int)(GH + 6))
 static const char labels[20] = { 'C','(',')','/', '7','8','9','*', '4','5','6','-',
                                  '1','2','3','+', '0','<','=','q' };
 static char eb[64];  static int el;      /* 表达式 */
@@ -60,9 +62,9 @@ static void put_res(const char *s) {
     rb[rl] = 0;
 }
 static void draw_display(void) {
-    struct gfxrect r = { 10, 10, 540, 64, 0x1B1B1B };
-    struct gfxtext t  = { 18, 20, 0xFFFFFF, {0} };
-    struct gfxtext t2 = { 18, 44, 0x2ECC71, {0} };
+    struct gfxrect r = { 8, 8, 384, 44, 0x1B1B1B };
+    struct gfxtext t  = { 14, 12, 0xFFFFFF, {0} };
+    struct gfxtext t2 = { 14, 30, 0x2ECC71, {0} };
     int i;
     wrect(&r);
     for (i = 0; i < 45 && i < el; i++) t.s[i] = eb[i];
@@ -72,11 +74,11 @@ static void draw_display(void) {
 }
 static void draw_buttons(void) {
     for (int k = 0; k < 20; k++) {
-        struct gfxrect r = { BX(k % 4), BY(k / 4), 128, 52,
+        struct gfxrect r = { BX(k % 4), BY(k / 4), BW, GH - 6,
                              (labels[k] >= '0' && labels[k] <= '9') ? 0x2E86DEu :
                              (labels[k] == '=') ? 0x27AE60u :
                              (labels[k] == 'q') ? 0xC0392Bu : 0x57606Fu };
-        struct gfxtext t = { BX(k % 4) + 60, BY(k / 4) + 22, 0xFFFFFFu, {0} };
+        struct gfxtext t = { BX(k % 4) + BW / 2 - 4, BY(k / 4) + (GH - 6) / 2 - 4, 0xFFFFFFu, {0} };
         t.s[0] = labels[k];
         wrect(&r);
         wtext(&t);
@@ -114,18 +116,23 @@ static void action(char k) {
 }
 
 void user_main(void) {
+    long W, H;
     sys(11, (intptr_t)"/dev/tty", 0, 0);
     wgfx();
+    winsize(&W, &H);
+    BW = (W - 16 - 3 * 6) / 4;
+    GH = 38;
+    GY = 58;
     draw_buttons();
     draw_display();
     for (;;) {
         struct wxev e;
         if (!wevent(&e)) { wyield(); continue; }
-        if (e.type == 2) {                       /* 点击：命中按钮格 */
-            int col = ((int)e.a - 10) / 138, row = ((int)e.b - 90) / 60;
-            int lx = (int)e.a - 10 - col * 138, ly = (int)e.b - 90 - row * 60;
+        if (e.type == 2) {
+            int col = ((int)e.a - 8) / (int)(BW + 6), row = ((int)e.b - GY) / (int)(GH + 6);
+            int lx = (int)e.a - 8 - col * (int)(BW + 6), ly = (int)e.b - GY - row * (int)(GH + 6);
             if (col >= 0 && col < 4 && row >= 0 && row < 5
-             && lx >= 0 && lx < 128 && ly >= 0 && ly < 52)
+             && lx >= 0 && lx < (int)BW && ly >= 0 && ly < (int)GH - 6)
                 action(labels[row * 4 + col]);
         } else if (e.type == 1) {
             char c = (char)e.a;

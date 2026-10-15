@@ -58,14 +58,12 @@ void user_main(void) {
         } else if (streq(line, "calc") || streq(line, "clock") || streq(line, "notepad")) {
             char cmd[24] = "/bin/";
             for (int i = 0; i < 15 && line[i]; i++) cmd[5 + i] = line[i];
-            long pid = sys(7, 0, 0, 0);          /* fork：子 spawn 应用窗，父等待 */
-            if (pid == 0) {
+            long pid = sys(7, 0, 0, 0);          /* fork：GUI 应用不等待 */
+            if (pid == 0) {                      /* 子：换像成应用（窗随 execve 开） */
                 sys(10, (intptr_t)cmd, 0, 0);
                 sys(3, 0, 0, 0);
-            } else {
-                sys(8, 0, 0, 0);
-                uprint("[sh] app exited\n");
             }
+            /* 父：不 wait，立即回提示符——shell 要能继续启动其他应用 */
         } else if (line[0]=='e' && line[1]=='c' && line[2]=='h' && line[3]=='o' && line[4]==' ') {
             uprint(line + 5);
             uprint("\n");

@@ -252,6 +252,7 @@ typedef struct task {
 
 extern task_t *current;
 void tasks_init(void);
+void task_kill(uint32_t pid);          /* 关窗关闭应用：终止归属任务并回收 */
 task_t *task_create(void (*entry)(void), int is_user);
 task_t *task_clone(task_t *parent, struct regs *r);   /* fork：复制地址空间+现场 */
 uint32_t task_wait_scan(uint32_t pid);
