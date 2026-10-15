@@ -82,6 +82,8 @@ void syscall_dispatch(struct regs *r) {
         }
         kname[15] = 0;
         int rc = task_exec_image(current, kname);
+        { extern void debug_ser(const char *);
+          debug_ser(rc == 0 ? "[exec ok]\n" : "[exec fail]\n"); }
         if (rc == 0) {
             /* gfx 模式：为换像后的程序开自己的窗口（应用窗） */
             if (gfx_active()) {

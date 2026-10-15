@@ -57,6 +57,8 @@ struct win {
     int ilen;
 };
 static struct win wins[MAX_WIN];
+static int zlist[MAX_WIN];              /* 叠放次序：zlist[0] 最底、zlist[zn-1] 最顶（存槽位号） */
+static int zn;                          /* zlist 中的窗口数 */
 static struct drawop ring[MAX_WIN][RING_N];
 static volatile int rhead[MAX_WIN], rtail[MAX_WIN];
 static struct wmev evq[MAX_WIN][EVN];
@@ -299,6 +301,8 @@ static void draw_window(int i) {
     }
     fb_rect(w->x, w->y, w->w, 16, foc ? C_TITLE_FOC : C_TITLE_UNFOC);
     dtext(w->x + 3, w->y + 4, w->title, 0xFFFFFF, (w->w - 6) / 8);
+    fb_rect(w->x + w->w - 15, w->y + 2, 13, 12, 0xC0392B);   /* 关闭钮 X */
+    dtext(w->x + w->w - 13, w->y + 3, "X", 0xFFFFFF, 1);
     uint32_t bc = foc ? C_BORDER_FOC : C_BORDER_UNFOC;
     for (int t = 0; t < 2; t++) {
         fb_rect(w->x - t, w->y - t, w->w + 2 + 2 * t, 1, bc);
@@ -313,8 +317,8 @@ static void draw_desktop(void) {
     fb_rect(6, fb_h - 24, 90, 18, C_START);
     fb_text(14, fb_h - 20, "boot2xfce", 0x111111);
     fb_text(fb_w - 170, fb_h - 20, "ESC:new  click:focus", 0x8395A7);
-    for (int i = 0; i < MAX_WIN; i++)
-        if (wins[i].used) draw_window(i);
+    for (int k = 0; k < zn; k++)
+        draw_window(zlist[k]);
 }
 
 /* ---------- 光标（保存区 + 箭头精灵） ---------- */
@@ -337,11 +341,27 @@ static void cursor_erase(void) {
 }
 
 /* ---------- 窗口操作 ---------- */
+/* 把槽位 i 升到叠放最顶（点击命中/新窗/复用时调） */
+static void zraise(int i) {
+    int k;
+    for (k = 0; k < zn; k++) if (zlist[k] == i) break;
+    if (k >= zn) return;
+    for (; k < zn - 1; k++) zlist[k] = zlist[k + 1];
+    zlist[zn - 1] = i;
+}
+/* 槽位 i 关闭后从叠放表摘除 */
+static void zremove(int i) {
+    int k;
+    for (k = 0; k < zn; k++) if (zlist[k] == i) break;
+    if (k >= zn) return;
+    for (; k < zn - 1; k++) zlist[k] = zlist[k + 1];
+    zn--;
+}
 static int win_new(const char *title, uint32_t pid, int is_tty) {
-    /* 同属主已有窗口则直接复用（一个任务一个窗） */
+    /* 同属主已有窗口则直接复用（一个任务一个窗），并升到最前 */
     if (pid) {
         struct win *ex = win_by_pid(pid);
-        if (ex) { focus = (int)(ex - wins); return (int)(ex - wins); }
+        if (ex) { int i = (int)(ex - wins); focus = i; zraise(i); return i; }
     }
     for (int i = 0; i < MAX_WIN; i++) {
         if (wins[i].used) continue;
@@ -357,6 +377,7 @@ static int win_new(const char *title, uint32_t pid, int is_tty) {
         wins[i].y = 24 + (i / 2) * 60;
         wins[i].w = 560;
         wins[i].h = 400;
+        zlist[zn++] = i;                     /* 新窗落最顶 */
         focus = i;
         return i;
     }
@@ -392,6 +413,7 @@ void gfx_on_exit(uint32_t pid) {                     /* 任务退出关窗 */
     for (int i = 0; i < MAX_WIN; i++)
         if (wins[i].used && wins[i].pid == pid) {
             canvas_free(i);
+            zremove(i);
             wins[i].used = 0;
         }
     gfx_gen++;
@@ -450,6 +472,9 @@ static struct wtty *focus_wt(void) {
     return &wt[focus];
 }
 void gfx_key_feed(char c) {
+    { extern void debug_ser(const char *);
+      extern void debug_hex(uint32_t);
+      debug_ser("[k="); debug_hex((uint32_t)c); debug_ser("]\n"); }
     struct wtty *t = focus_wt();
     if (!t) return;
     if (c == '\b') { if (t->len) { t->len--; struct win *w = &wins[focus]; if (w->ilen) { w->ilen--; w->input[w->ilen] = 0; } } return; }
@@ -468,6 +493,8 @@ int tty_read_window(uint32_t pid, char *out, int max) {
     for (;;) {
         current->if_on = 0;             /* 阻塞轮询发生在 int80 门内 */
         if (t->ready) {
+            { extern void debug_ser(const char *);
+              debug_ser("[wt wake]\n"); }
             int n = t->len < max ? t->len : max - 1;
             memcpy(out, t->line, n); out[n] = 0;
             t->len = 0; t->ready = 0;
@@ -512,28 +539,38 @@ void gfx_task(void) {
         }
         /* 鼠标事件：攒一批，末尾统一重绘 */
         int moved = 0;
+        uint32_t close_pid = 0;
         while (mouse_pop(&btn, &dx, &dy)) {
             cursor_erase();
             cur_x += dx; cur_y -= dy;
             if (cur_x < 0) cur_x = 0; if (cur_x > (int)fb_w - 9) cur_x = (int)fb_w - 9;
             if (cur_y < 0) cur_y = 0; if (cur_y > (int)fb_h - 13) cur_y = (int)fb_h - 13;
             if (btn & 1) {
-                for (int i = MAX_WIN - 1; i >= 0; i--) {
+                /* 命中测试按 Z 序从顶往下；命中即升至最前（点哪层哪层到前台） */
+                for (int k = zn - 1; k >= 0; k--) {
+                    int i = zlist[k];
                     struct win *w = &wins[i];
                     if (!w->used) continue;
                     if (cur_x >= (int)w->x && cur_x < (int)(w->x + w->w)
                      && cur_y >= (int)w->y && cur_y < (int)(w->y + w->h)) {
-                        focus = i;
-                        if (w->is_gfx)                   /* 图形窗收点击事件 */
-                            gfx_ev_push(i, 2,
-                                        (long)(cur_x - (int)w->x),
-                                        (long)(cur_y - (int)w->y));
+                        if (cur_x >= (int)(w->x + w->w - 15) && cur_x < (int)(w->x + w->w - 2)
+                         && cur_y >= (int)w->y + 2 && cur_y < (int)w->y + 14) {
+                            close_pid = w->pid;   /* 关闭钮：批末终止归属任务 */
+                        } else {
+                            zraise(i);            /* 点击升到前台 */
+                            focus = i;
+                            if (w->is_gfx)        /* 图形窗收点击事件 */
+                                gfx_ev_push(i, 2,
+                                            (long)(cur_x - (int)w->x),
+                                            (long)(cur_y - (int)w->y));
+                        }
                         break;
                     }
                 }
             }
             moved = 1;
         }
+        if (close_pid) task_kill(close_pid);      /* 关窗：终止应用并回收 */
         if (moved) { draw_desktop(); cursor_draw(); }
         /* 键盘事件 */
         int c, keyed = 0;

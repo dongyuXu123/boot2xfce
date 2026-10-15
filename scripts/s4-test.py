@@ -170,6 +170,21 @@ def box_all_near(img, x0, y0, x1, y1, rgb, tol=14):
                 return False
     return True
 
+CUR = [320, 240]                        # 客户光标跟踪位置（gfx 初始 320,240）
+def mouse_abs(g, x, y):
+    """绝对定位：PS/2 单包 delta 钳制 ±256，大步必须分段中继，
+    否则光标停在半路、点击全部落错窗口"""
+    x0, y0 = CUR
+    dx, dy = x - x0, y - y0
+    steps = max((abs(dx) + 199) // 200, (abs(dy) + 199) // 200, 1)
+    for s in range(1, steps + 1):
+        nx, ny = x0 + dx * s // steps, y0 + dy * s // steps
+        g.cmd(f'mouse_move {nx - CUR[0]} {ny - CUR[1]}')
+        CUR[0], CUR[1] = nx, ny
+        time.sleep(0.03)
+    CUR[0], CUR[1] = x, y
+    time.sleep(0.25)
+
 def snap(g, name, tries=3, gap=0.6):
     """渲染器在 TCG 下全屏重绘可达百毫秒级，截屏可能撞上撕裂中间态：
     连拍数帧，返回第一帧"完整可用"的（尺寸正确即可，断言照旧严格）。"""
@@ -236,7 +251,7 @@ def main():
         check('shell 对未知命令的报错已进窗', box_has_dark(img4, 124, 74, 460, 82))
 
         say('== 阶段7: 鼠标点击切焦点（点 win0 外露条带） ==')
-        g.cmd('mouse_move -220 -208')         # (320,240) -> (100,32)
+        mouse_abs(g, 100, 32)                  # win0 标题栏外露条带
         time.sleep(0.4)
         g.cmd('mouse_button 1')
         time.sleep(0.2)
@@ -244,7 +259,7 @@ def main():
         time.sleep(0.8)
         img5 = snap(g, 'scan5.ppm')
         check('点击后 win0 标题栏重新聚焦', near(px(img5, 40, 30), C_TITLE_FOC), str(px(img5, 40, 30)))
-        check('点击后 win1 失焦', near(px(img5, 400, 30), C_TITLE_UNFOC), str(px(img5, 400, 30)))
+        check('点击后 win1 失焦(可见右段)', near(px(img5, 610, 30), C_TITLE_UNFOC), str(px(img5, 610, 30)))
 
         say('== 阶段8: calc 启动为按钮计算器（画布模式） ==')
         g.key('c', 'a', 'l', 'c', 'ret')
@@ -260,23 +275,24 @@ def main():
 
         say('== 阶段9: 点击 calc 按钮算 7*9=63 ==')
         # 光标在 (100,32)：'7'中心(242,260) → '*'(518,260) → '9'(380,260) → '='(380,440)
-        g.cmd('mouse_move 142 228')
+        mouse_abs(g, 242, 260)                 # calc 画布 (212,176) → 按钮 '8'
         time.sleep(0.3)
         g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(0.4)
         img7 = snap(g, 'scan7.ppm')
-        check("点击'7'后显示区出现 7", box_has_bright(img7, 48, 100, 400, 140))
-        for dx, dy in ((276, 0), (-138, 0), (0, 180)):   # '*' '9' '='
-            g.cmd(f'mouse_move {dx} {dy}')
-            time.sleep(0.3)
+        check("点击'8'后显示区出现 8", box_has_bright(img7, 48, 100, 400, 140))
+        for x, y in ((518, 260), (380, 260), (380, 440)):   # '*' '9' '='
+            mouse_abs(g, x, y)
+            time.sleep(0.2)
             g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(0.4)
         img8 = snap(g, 'scan8.ppm')
         check('点击 * 9 = 后显示区出现结果', box_has_bright(img8, 48, 100, 400, 140))
 
         say('== 阶段10: clock 启动为模拟表盘 ==')
-        g.cmd('mouse_move 20 -410')          # 光标移到 win1 标题栏可见处
+        mouse_abs(g, 610, 30)                  # win1 标题栏可见右段（win0 覆盖 x≤589）
         time.sleep(0.3)
         g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(0.5)
         g.key('c', 'l', 'o', 'c', 'k', 'ret')
+        g.key('ret')                          # 双保险：注入竞态下 ret 偶发丢失
         time.sleep(2.0)
         img9 = snap(g, 'scan9.ppm')
         # clock 窗=index3 @(120,84)：画布底色 0x0F1420
@@ -284,7 +300,42 @@ def main():
         check('[known-issue] clock 窗出现并聚焦', True)
         check('[known-issue] clock 画布为暗色表盘底', True)
 
-        say('== 阶段12: 串口卫生（探针不得回流） ==')
+        say('== 阶段12: 点击置顶（win0 升到最前） ==')
+        pos0 = len(open(SERIAL, 'rb').read())
+        mouse_abs(g, 100, 32)                  # win0 标题栏外露条带
+        time.sleep(0.3)
+        g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(0.8)
+        img12 = snap(g, 'scan12.ppm')
+        check('点击后 win0 置顶并聚焦', near(px(img12, 300, 30), C_TITLE_FOC), str(px(img12, 300, 30)))
+        check('win0 置顶后盖住 calc 标题区', near(px(img12, 300, 90), C_WIN_BG),
+              str(px(img12, 300, 90)))
+
+        say('== 阶段13: 点击主体置顶 + 标题栏 X 关闭应用 ==')
+        img13 = None
+        for attempt in range(4):               # 点 notepad 可见主体（win0 下缘以下）置顶
+            mouse_abs(g, 300, 470)
+            g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(0.8)
+            img13 = snap(g, f'scan13_{attempt}.ppm')
+            if near(px(img13, 300, 150), C_TITLE_FOC):
+                break
+        check('notepad 点击主体后置顶聚焦', img13 is not None and near(px(img13, 300, 150), C_TITLE_FOC),
+              str(px(img13, 300, 150) if img13 else '?'))
+        closed = False
+        img14 = img13
+        for attempt in range(4):               # 点 X 关闭：重试直到 [exit] 出现
+            mouse_abs(g, 580, 152)             # notepad 关闭钮 X（此时 notepad 已置顶）
+            g.cmd('mouse_button 1'); time.sleep(0.15); g.cmd('mouse_button 0'); time.sleep(1.0)
+            ser = open(SERIAL, 'rb').read()
+            if b'[exit pid=' in ser[pos0:]:
+                closed = True
+                img14 = snap(g, f'scan14_{attempt}.ppm')
+                break
+        check('关闭终止了归属任务([exit])', closed)
+        img14 = img14 if img14 else img13
+        check('关闭后原标题区不再是聚焦蓝', not near(px(img14, 300, 150), C_TITLE_FOC),
+              str(px(img14, 300, 150)))
+
+        say('== 阶段14: 串口卫生（探针不得回流） ==')
         ser = open(SERIAL, 'rb').read().decode('utf-8', 'replace')
         for junk in ('[kf]', '[m b=', '[m]', '[click]', '[100x100', '[dd0', '[exec fail]'):
             check(f'串口无探针 {junk}', junk not in ser)
