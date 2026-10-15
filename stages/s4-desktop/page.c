@@ -37,6 +37,7 @@ uint32_t *page_dir_create(void) {
      * 遍历它；普通分配器的高区帧在用户页目录里不可见（本 bug 曾让
      * 子进程页目录变成散落零页，CR3 一换即死——S3 纯属地理 luck） */
     uint32_t pd_pa = pmm_alloc_frame_low();
+    if (!pd_pa) return 0;                /* 低区耗尽：调用方须处理 */
     uint32_t *pd = (uint32_t *)pd_pa;
     memset(pd, 0, 4096);
     /* 内核区只继承 PDE0（低 4MiB：内核代码/堆/低区分配器的家）。
@@ -73,6 +74,7 @@ void page_copy_space(uint32_t *dst, uint32_t *src) {
          * 只读，且页目录项不可再被 walk 的 create 路径改写：
          * 教学简化：给子单独复制页表结构，逐项共享帧 */
         uint32_t pt_pa = pmm_alloc_frame_low();
+        if (!pt_pa) break;               /* 低区耗尽：已复制的前缀仍有效 */
         memset((void *)pt_pa, 0, 4096);
         dst[i] = pt_pa | PG_P | PG_RW | PG_US;
         uint32_t *dpt = (uint32_t *)pt_pa;
@@ -98,7 +100,11 @@ static uint32_t *walk(uint32_t *pd, uint32_t va, int create) {
     uint32_t i = PD_INDEX(va);
     if (!(pd[i] & PG_P)) {
         if (!create) return 0;
-        uint32_t pt_pa = pmm_alloc_frame_low();
+        /* 内核 PD 的页表走高区（仅 CPU 走表器与 boot_pd 恒等别名访问）；
+         * 任务 PD 的页表必须低区（内核要在 PDE0-only 任务视角下经恒等
+         * 别名写它——高区帧在该视角不可见，会静默失效） */
+        uint32_t pt_pa = (pd == page_kernel_pd()) ? pmm_alloc_frame_high()
+                                                  : pmm_alloc_frame_low();
         if (!pt_pa) return 0;
         memset((void *)pt_pa, 0, 4096);
         pd[i] = pt_pa | PG_P | PG_RW | (va >= USER_BASE ? PG_US : 0);
@@ -108,6 +114,7 @@ static uint32_t *walk(uint32_t *pd, uint32_t va, int create) {
 
 void page_map(uint32_t *pd, uint32_t va, uint32_t pa, int user, int rw) {
     uint32_t *pte = walk(pd, va, 1);
+    if (!pte) return;                    /* 页表分配失败：放弃本次映射（OOM） */
     *pte = (pa & ~0xFFF) | PG_P | (rw ? PG_RW : 0) | (user ? PG_US : 0);
     if (pd == current_pd())          /* 改的是正在用的表 → TLB 要刷新 */
         reload_cr3();

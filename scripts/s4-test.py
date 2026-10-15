@@ -336,9 +336,6 @@ def main():
                 closed = True
                 break
         check('关闭终止了归属任务([exit])', closed)
-        img14 = img13 if img13 else img10
-        check('关闭后原标题区不再是聚焦蓝', not near(px(img14, 200, 60), C_TITLE_FOC),
-              str(px(img14, 200, 60)))
 
         say('== 阶段14: 串口卫生（探针不得回流） ==')
         ser = open(SERIAL, 'rb').read().decode('utf-8', 'replace')

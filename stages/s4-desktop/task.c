@@ -148,6 +148,11 @@ int task_spawn(const char *path, uint32_t ppid, const char *title) {
     task_t *t = task_create(0, 1);
     if (!t) return -1;
     t->ppid = ppid;
+    if (!t->pd) {                        /* 低区耗尽：回收并报告 spawn 失败 */
+        kfree(t->kstack);
+        memset(t, 0, sizeof(*t));
+        return -1;
+    }
     if (task_exec_image(t, path) != 0) {
         kfree(t->kstack);
         memset(t, 0, sizeof(*t));
